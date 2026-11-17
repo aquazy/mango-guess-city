@@ -1,0 +1,2655 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+<title>芒果猜城市</title>
+<meta name="theme-color" content="#F1EBE0" />
+<!-- 首帧前先算好竖屏画框的缩放比，避免桌面端出现"先撑满再缩小"的跳动 -->
+<script>
+(function(){
+  var s = Math.min(1, (window.innerWidth - 40) / 393, (window.innerHeight - 40) / 852);
+  document.documentElement.style.setProperty('--frame-s', (s > 0 ? s : 0.3).toFixed(4));
+  // 兜底：无论地图/主脚本发生什么，3 秒后一定撤掉启动画面
+  setTimeout(function(){
+    var el = document.getElementById('splash');
+    if(el) el.classList.add('hide');
+  }, 3000);
+})();
+</script>
+<!-- MapLibre 自托管（同域加载，避免 unpkg 在境内偶发的长时间卡顿）。
+     境外兜底源只在极少数包外区域按需连接，不再开机就 preconnect 占连接数 -->
+<link href="vendor/maplibre-gl.css" rel="stylesheet" />
+<!-- MapLibre 自托管：直接 <script defer> 交给浏览器原生加载（不走解压注入，
+     最稳，任何内核/内置 WebView 都能执行）；defer 不阻塞 HTML 解析 -->
+<script defer src="vendor/maplibre-gl.js"></script>
+<script>
+function loadMapLibre(){
+  if(window.maplibregl) return Promise.resolve();
+  // 兜底：上面的标签万一没加载成功，再动态插一次
+  return new Promise(function(res, rej){
+    var s = document.createElement('script');
+    s.src = 'vendor/maplibre-gl.js'; s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+</script>
+<!-- 百度统计（tongji.baidu.com 站点 ID: a83de6ff4116094cf5c3dc9155e882d8） -->
+<script>
+var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement('script');
+  hm.src = 'https://hm.baidu.com/hm.js?a83de6ff4116094cf5c3dc9155e882d8';
+  var s = document.getElementsByTagName('script')[0];
+  s.parentNode.insertBefore(hm, s);
+})();
+</script>
+<style>
+  :root{
+    --ink:#231E17;
+    --ink-soft:rgba(35,30,23,.56);
+    --ink-faint:rgba(35,30,23,.34);
+    --cream:#F1EBE0;
+    --paper:#FCFAF6;
+    /* 全站强调色统一为灰（原橙色已移除） */
+    --mango:#4A4643;          /* 选中态 / 强调深灰 */
+    --mango-deep:#3C3A38;     /* 更深一档深灰 */
+    --dark:#8A8885;           /* 主操作按钮、品牌胶囊底色（深灰 #3C3A38 提亮一半） */
+    --pill-h:36px;            /* 顶栏三枚按钮统一高度 */
+    --pill-w:96px;            /* 顶栏三枚按钮统一宽度 */
+    --pill-fs:12.5px;         /* 顶栏三枚按钮统一字号 */
+    --glass:rgba(255,255,255,.80);
+    --glass-strong:rgba(255,255,255,.92);
+    --hair:rgba(35,30,23,.10);
+    --shadow-s:0 2px 10px rgba(70,52,22,.12);
+    --shadow-m:0 8px 26px rgba(70,52,22,.16);
+    --shadow-l:0 24px 60px rgba(60,44,18,.24);
+    --r:18px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html{height:100%;overflow:hidden;}
+  body{
+    /* 固定定位 + 高度与视口同源：任何情况下文档都不能滚动/位移
+       （打开弹窗时若祖先被程序化滚动，整页会看起来“往上顶”） */
+    position:fixed;inset:0;width:100%;margin:0;
+    height:100%;
+    height:100dvh;
+    overflow:hidden;
+    background:#F0F0F0;   /* 手机外留白：中性浅灰（无任何色相倾向） */
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    color:var(--ink);
+    display:flex;align-items:center;justify-content:center;
+    -webkit-font-smoothing:antialiased;
+    overscroll-behavior:none;
+  }
+  /* ---------- 手机外壳：固定 iPhone 15 竖屏画框（393×852），
+       桌面端按可用空间等比缩放，画面与真机完全一致 ---------- */
+  .app{
+    --app-w:393px;                 /* iPhone 15 逻辑宽度 */
+    --app-h:852px;                 /* iPhone 15 逻辑高度 */
+    position:absolute;left:50%;top:50%;
+    width:var(--app-w);
+    height:var(--app-h);
+    transform:translate(-50%,-50%) scale(var(--frame-s,1));
+    transform-origin:center center;
+    border-radius:46px;
+    overflow:hidden;
+    background:var(--cream);
+    box-shadow:0 40px 100px rgba(0,0,0,.24), 0 0 0 1px rgba(255,255,255,.6) inset;
+    isolation:isolate;
+  }
+  /* 桌面留白：极淡的中性灰，让竖屏画框浮起来 */
+  @media (min-width:541px){
+    body{background:radial-gradient(120% 120% at 50% 0%,#FAFAFA 0%,#EFEFEE 55%,#E7E7E6 100%);}
+  }
+  /* 真正的手机（竖屏、窄屏）：贴满全屏，不加画框 */
+  @media (max-width:540px){
+    body{background:var(--cream);}
+    .app{
+      --app-w:100vw;--app-h:100dvh;
+      left:0;top:0;width:100%;height:100%;max-width:none;max-height:none;
+      transform:none;border-radius:0;box-shadow:none;
+    }
+  }
+  #map{position:absolute;inset:0;background:var(--cream);}
+  .maplibregl-canvas{outline:none;}
+  .maplibregl-ctrl-attrib,.maplibregl-ctrl-logo{display:none !important;}
+
+  /* ---------- 顶栏：三枚胶囊按钮尺寸/字号完全一致 ---------- */
+  .topbar{
+    position:absolute;top:0;left:0;right:0;
+    padding:calc(14px + env(safe-area-inset-top)) 16px 0 16px;
+    display:flex;align-items:flex-start;justify-content:space-between;
+    pointer-events:none;z-index:20;
+  }
+  .topbar-left{
+    display:flex;flex-direction:column;gap:8px;flex:0 0 auto;align-items:flex-start;
+  }
+  .topbar-right{
+    display:flex;flex-direction:column;gap:8px;flex:0 0 auto;align-items:flex-end;
+  }
+  /* 题库四档：默认只显示「难度」一枚（与 1/10 同尺寸），点击后展开四枚 */
+  .tier-toggle{
+    display:none;align-items:center;justify-content:center;flex:0 0 auto;
+    width:var(--pill-w);height:var(--pill-h);padding:0;border-radius:999px;border:0;cursor:pointer;
+    background:var(--glass);
+    backdrop-filter:blur(14px) saturate(160%);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);
+    box-shadow:var(--shadow-s), 0 0 0 1px rgba(255,255,255,.65) inset;
+    color:var(--ink);font-family:inherit;font-size:var(--pill-fs);font-weight:620;letter-spacing:.04em;
+    white-space:nowrap;pointer-events:auto;
+    transition:transform .14s ease, background .18s ease, color .18s ease;
+  }
+  .tier-toggle.show{display:inline-flex;}
+  .tier-toggle:active{transform:scale(.94);background:rgba(255,255,255,.72);}
+  .tier-toggle.open{background:var(--glass-strong);box-shadow:var(--shadow-s), 0 0 0 1.5px rgba(35,30,23,.22) inset;}
+  .tier-bar{display:none;flex-direction:column;gap:6px;}
+  .tier-bar.show{display:flex;}
+  .tier-pill{
+    width:var(--pill-w);height:var(--pill-h);padding:0;border:0;border-radius:999px;cursor:pointer;
+    background:var(--glass);
+    backdrop-filter:blur(14px) saturate(160%);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);
+    box-shadow:var(--shadow-s), 0 0 0 1px rgba(255,255,255,.65) inset;
+    color:var(--ink);font-family:inherit;font-size:var(--pill-fs);font-weight:580;letter-spacing:.06em;
+    pointer-events:auto;
+    transition:transform .14s ease, background .18s ease, color .18s ease;
+  }
+  .tier-pill:active{transform:scale(.94);}
+  .tier-pill.on{background:var(--mango);color:#fff;font-weight:640;}
+  .brand{
+    display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+    width:var(--pill-w);height:var(--pill-h);padding:0;border-radius:999px;
+    background:var(--glass);
+    backdrop-filter:blur(14px) saturate(160%);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);
+    box-shadow:var(--shadow-s), 0 0 0 1px rgba(255,255,255,.65) inset;
+    color:var(--ink);
+    pointer-events:auto;
+  }
+  .brand svg{display:block;}
+  .city-name{
+    position:absolute;left:50%;top:calc(14px + env(safe-area-inset-top));
+    transform:translateX(-50%);
+    display:flex;align-items:center;justify-content:center;
+    width:var(--pill-w);height:var(--pill-h);padding:0 8px;border-radius:999px;
+    background:var(--glass);
+    backdrop-filter:blur(14px) saturate(160%);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);
+    box-shadow:var(--shadow-s), 0 0 0 1px rgba(255,255,255,.65) inset;
+    font-size:var(--pill-fs);font-weight:620;letter-spacing:.04em;color:var(--ink);
+    white-space:nowrap;overflow:hidden;
+    opacity:0;transition:opacity .3s ease;pointer-events:none;z-index:21;
+  }
+  .city-name.show{opacity:1;}
+  /* ---------- 限时挑战：顶部中间 60 秒倒计时胶囊 ---------- */
+  .timer-pill{z-index:26;font-weight:660;}
+  .timer-pill.low{color:#FF3B30;}
+  /* 「限时挑战」入口常驻：墙纸页和猜城市页都能直接开一局；进行中时描边强调 */
+  .time-btn{display:inline-flex;}
+  .time-btn.show{display:inline-flex;}
+  .time-btn.on{background:var(--glass-strong);box-shadow:var(--shadow-s), 0 0 0 1.5px rgba(35,30,23,.22) inset;}
+  /* 「芒果猜城市」常驻可点 = 进入猜城市页；限时进行中点它则退回普通版 */
+  .brand{cursor:pointer;}
+  .brand:active{background:rgba(255,255,255,.72);}
+  .brand h1{
+    margin:0;font-size:var(--pill-fs);font-weight:640;letter-spacing:.04em;line-height:1.15;
+    color:var(--ink);
+  }
+  .brand p{
+    margin:2px 0 0;font-size:9.5px;letter-spacing:.14em;color:var(--ink-soft);
+    text-transform:uppercase;font-weight:560;
+  }
+  .rand-btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:4px;flex:0 0 auto;
+    width:var(--pill-w);height:var(--pill-h);padding:0;border-radius:999px;border:0;cursor:pointer;
+    background:var(--glass);
+    backdrop-filter:blur(14px) saturate(160%);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);
+    box-shadow:var(--shadow-s), 0 0 0 1px rgba(255,255,255,.65) inset;
+    color:var(--ink);font-family:inherit;font-size:var(--pill-fs);font-weight:620;letter-spacing:.04em;
+    white-space:nowrap;pointer-events:auto;
+    transition:transform .14s ease, background .18s ease;
+  }
+  .rand-btn:active{transform:scale(.94);background:rgba(255,255,255,.72);}
+  .rand-btn svg{display:block;color:currentColor;flex:none;}
+  .rand-btn.hide{display:none;}       /* 猜城市模式下「随机国际」让位给题号计数器 */
+  /* 限时挑战全程（含结算）：强制收起墙纸页专属控件，
+     避免从墙纸页直接点「限时挑战」时漏出「随机国际」和底部三按钮 */
+  .app.timed-mode #randWorldBtn,
+  .app.timed-mode .bottombar{display:none !important;}
+
+  /* ---------- 猜城市小游戏 ---------- */
+  .guess-btn{
+    display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+    width:var(--pill-w);height:var(--pill-h);padding:0;border-radius:999px;border:0;cursor:pointer;
+    background:var(--glass);
+    backdrop-filter:blur(14px) saturate(160%);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);
+    box-shadow:var(--shadow-s), 0 0 0 1px rgba(255,255,255,.65) inset;
+    color:var(--ink);font-family:inherit;font-size:var(--pill-fs);font-weight:620;letter-spacing:.04em;
+    white-space:nowrap;pointer-events:auto;
+    transition:transform .14s ease, background .18s ease;
+  }
+  .guess-btn:active{transform:scale(.94);background:rgba(255,255,255,.72);}
+  .quiz{
+    position:absolute;left:0;right:0;bottom:calc(26px + env(safe-area-inset-bottom));
+    margin:0 auto;
+    display:flex;flex-direction:column;gap:10px;
+    width:min(148px,calc(var(--app-w) * .38));z-index:22;
+    opacity:0;pointer-events:none;transition:opacity .28s ease;
+  }
+  .quiz.show{opacity:1;pointer-events:auto;}
+  .quiz-item{
+    height:50px;border-radius:16px;border:0;cursor:pointer;font-family:inherit;
+    background:var(--glass);backdrop-filter:blur(14px) saturate(160%);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);
+    box-shadow:var(--shadow-s), 0 0 0 1px rgba(255,255,255,.65) inset;
+    color:var(--ink);font-size:15px;font-weight:620;letter-spacing:.06em;
+    transition:transform .15s ease, background .22s ease, color .22s ease, opacity .22s ease;
+  }
+  .quiz-item:active{transform:scale(.96);}
+  .quiz-item.reveal{background:rgba(104,168,104,.9);color:#fff;}
+  .quiz-item.wrong{background:rgba(214,106,96,.9);color:#fff;}
+  .quiz-item.dim{opacity:.5;}
+  .quiz-result{
+    height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+    font-size:16px;font-weight:640;letter-spacing:.12em;color:#fff;
+    background:rgba(84,88,94,.72);backdrop-filter:blur(10px);
+    -webkit-backdrop-filter:blur(10px);
+    opacity:0;transform:translateY(6px);transition:opacity .25s ease, transform .25s ease, background .25s ease;
+  }
+  .quiz-result.show{opacity:1;transform:none;}
+  .quiz-result.ok{background:rgba(96,164,96,.92);}
+  .quiz-result.no{background:rgba(212,102,92,.92);}
+
+  /* ---------- 轮回结算：成绩行居中 + 下方分享按钮 ---------- */
+  .quiz-final{
+    position:absolute;left:0;right:0;top:50%;height:0;z-index:23;
+    opacity:0;pointer-events:none;transition:opacity .28s ease;
+  }
+  .quiz-final.show{opacity:1;pointer-events:auto;}
+  .qf-line{
+    position:absolute;left:50%;top:0;transform:translate(-50%,-50%);
+    background:#fff;border-radius:10px;
+    padding:.4em .5em;                     /* 白底贴近文字 */
+    box-shadow:0 6px 20px rgba(0,0,0,.18);
+    font-size:15px;font-weight:700;color:#000;line-height:1.15;
+    white-space:nowrap;
+  }
+  .qf-num{color:#FF3B30;}
+  /* 结算画面中上部的二维码卡片：白底圆角，悬在成绩行上方 */
+  .qf-qr{
+    position:absolute;left:50%;bottom:26px;transform:translateX(-50%);
+    display:flex;flex-direction:column;align-items:center;gap:5px;
+    background:#fff;border-radius:14px;padding:10px 12px 8px;
+    box-shadow:0 6px 20px rgba(0,0,0,.18);
+    z-index:2;opacity:0;transition:opacity .28s ease;
+  }
+  .quiz-final.show .qf-qr{opacity:1;}
+  .qf-qr img{width:104px;height:104px;display:block;}
+  .qf-qr span{font-size:11px;font-weight:640;letter-spacing:.08em;color:var(--ink);white-space:nowrap;}
+  .quiz-share{
+    position:absolute;left:50%;top:30px;transform:translateX(-50%);
+    height:44px;padding:0 22px;border-radius:999px;border:0;cursor:pointer;font-family:inherit;
+    background:#FF7A1A;color:#fff;
+    box-shadow:0 8px 22px rgba(255,122,26,.38);
+    font-size:15px;font-weight:640;letter-spacing:.08em;white-space:nowrap;
+    display:flex;align-items:center;justify-content:center;
+    transition:transform .15s ease, opacity .22s ease, top .2s ease;
+  }
+  .quiz-share:active{transform:translateX(-50%) scale(.96);}
+  .quiz-share.done{opacity:.7;pointer-events:none;}
+
+  /* ---------- 侧边控件 ---------- */
+  .sidebar{
+    position:absolute;right:14px;top:50%;transform:translateY(-52%);
+    display:flex;flex-direction:column;gap:9px;z-index:20;
+  }
+  .ctrl{
+    width:42px;height:42px;border-radius:15px;border:0;
+    background:var(--glass);backdrop-filter:blur(14px) saturate(160%);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);
+    box-shadow:var(--shadow-s), 0 0 0 1px rgba(255,255,255,.65) inset;
+    display:grid;place-items:center;cursor:pointer;color:var(--ink);
+    transition:transform .16s ease, background .16s ease;
+  }
+  .ctrl:active{transform:scale(.92);background:var(--glass-strong);}
+  .ctrl.locating svg{animation:spin 1.6s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  /* ---------- 我的位置：红点 ---------- */
+  .me{position:relative;width:28px;height:28px;pointer-events:none;}
+  .me-dot{
+    position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;
+    border-radius:50%;background:#FF3B30;
+    box-shadow:0 1px 5px rgba(0,0,0,.28);
+  }
+  .me-halo{
+    position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;
+    border-radius:50%;background:rgba(255,59,48,.42);
+    animation:mePulse 2.6s cubic-bezier(.2,.6,.4,1) infinite;
+  }
+  @keyframes mePulse{
+    0%{transform:scale(1);opacity:.9;}
+    70%{transform:scale(3.4);opacity:0;}
+    100%{transform:scale(3.4);opacity:0;}
+  }
+
+  /* ---------- 底部主操作 ---------- */
+  .bottombar{
+    position:absolute;left:14px;right:14px;
+    bottom:calc(26px + env(safe-area-inset-bottom));
+    display:flex;gap:10px;z-index:25;
+  }
+  .btn{
+    border:0;cursor:pointer;font-family:inherit;
+    display:flex;align-items:center;justify-content:center;gap:9px;
+    border-radius:20px;font-size:14.5px;font-weight:620;letter-spacing:.02em;
+    transition:transform .16s ease, box-shadow .16s ease, background .16s ease;
+  }
+  .btn:active{transform:scale(.97);}
+  .btn-ghost{
+    flex:0 0 auto;padding:0 14px;height:56px;
+    background:var(--glass);backdrop-filter:blur(16px) saturate(160%);
+    -webkit-backdrop-filter:blur(16px) saturate(160%);
+    box-shadow:var(--shadow-m), 0 0 0 1px rgba(255,255,255,.65) inset;
+    color:var(--ink);
+  }
+  .swatch{
+    width:22px;height:22px;border-radius:50%;
+    background:#3C3A38;
+    box-shadow:0 0 0 2px rgba(255,255,255,.95), 0 2px 6px rgba(0,0,0,.22);
+    transition:background .28s ease;
+  }
+  .btn-primary{
+    flex:1;height:56px;
+    background:var(--glass);
+    backdrop-filter:blur(16px) saturate(160%);
+    -webkit-backdrop-filter:blur(16px) saturate(160%);
+    color:var(--ink);
+    box-shadow:var(--shadow-m), 0 0 0 1px rgba(255,255,255,.65) inset;
+  }
+  .btn-primary svg{opacity:.9;}
+
+  .credit{display:none;}
+
+  /* ---------- 遮罩 ---------- */
+  .scrim{
+    position:absolute;inset:0;background:transparent;
+    opacity:0;pointer-events:none;transition:opacity .28s ease;z-index:30;
+  }
+  .scrim.show{opacity:1;pointer-events:auto;}
+
+  /* ---------- 调色抽屉 ---------- */
+  .sheet{
+    position:absolute;left:0;right:0;bottom:0;z-index:40;
+    /* 用不透明底替代 backdrop-filter：iOS 上滤镜 + transform 会导致触控命中区错位 */
+    background:#FCFAF6;
+    border-radius:28px 28px 0 0;
+    padding:10px 18px calc(18px + env(safe-area-inset-bottom));
+    transform:translateY(102%);
+    /* 关闭态彻底不可见/不可点，避免 iOS 合成层残留“幽灵面板”挡住点击 */
+    visibility:hidden;
+    transition:transform .34s cubic-bezier(.32,.72,0,1), visibility 0s linear .34s;
+    box-shadow:0 -12px 40px rgba(60,44,18,.16);
+    pointer-events:none;
+  }
+  .sheet.open{
+    transform:translateY(0);
+    visibility:visible;
+    pointer-events:auto;
+    transition:transform .34s cubic-bezier(.32,.72,0,1), visibility 0s;
+  }
+  .sheet-grip{
+    width:38px;height:4px;border-radius:2px;background:rgba(35,30,23,.16);
+    margin:0 auto 12px;
+  }
+  .sheet-hd{
+    display:flex;align-items:baseline;justify-content:space-between;
+    padding:0 2px 12px;
+  }
+  .sheet-hd h2{margin:0;font-size:15px;font-weight:660;letter-spacing:.01em;}
+  .sheet-hd span{font-size:11px;color:var(--ink-faint);letter-spacing:.08em;}
+  .shuffle{
+    border:0;background:rgba(35,30,23,.055);color:var(--ink-soft);
+    font-family:inherit;font-size:11.5px;font-weight:560;
+    padding:6px 11px;border-radius:999px;cursor:pointer;letter-spacing:.02em;
+    display:inline-flex;align-items:center;gap:5px;
+  }
+  .shuffle:active{background:rgba(35,30,23,.10);}
+
+  .grid{
+    display:grid;grid-template-columns:repeat(12,1fr);
+    gap:5px;padding:2px 0 14px;
+  }
+  .sw{
+    position:relative;aspect-ratio:1;border-radius:6px;border:0;padding:0;
+    cursor:pointer;transition:transform .14s ease, box-shadow .2s ease;
+    box-shadow:0 1px 2px rgba(60,44,18,.14), 0 0 0 .5px rgba(35,30,23,.10) inset;
+  }
+  .sw:active{transform:scale(.88);}
+  .sw.on{
+    box-shadow:0 0 0 2px #fff, 0 0 0 4px var(--ink), 0 2px 8px rgba(0,0,0,.2);
+    z-index:2;
+  }
+  .city-grid{
+    display:grid;grid-template-columns:repeat(4,1fr);
+    gap:7px;padding:2px 0 0;margin-bottom:14px;
+    /* 尽量露出 6 行，矮屏按视口高度收敛，其余靠滚动 */
+    --row-h:38px;--row-gap:7px;
+    max-height:min(calc(var(--row-h) * 6 + var(--row-gap) * 5 + 32px), calc(var(--app-h) * .38));
+    overflow-y:auto;-webkit-overflow-scrolling:touch;
+    overscroll-behavior:contain;
+    scrollbar-width:thin;
+  }
+  .city-grid::-webkit-scrollbar{width:4px;}
+  .city-grid::-webkit-scrollbar-thumb{background:rgba(35,30,23,.22);border-radius:99px;}
+  .city-grid::-webkit-scrollbar-track{background:transparent;}
+  /* 分组标题（国内 / 国际）：横跨整行，滚动时吸顶 */
+  .city-group{
+    grid-column:1/-1;
+    position:sticky;top:0;z-index:3;
+    display:flex;align-items:center;gap:8px;
+    height:26px;padding:0 2px;
+    background:#FCFAF6;
+    font-size:11px;font-weight:660;letter-spacing:.14em;color:var(--ink-soft);
+  }
+  .city-group::after{content:'';flex:1;height:1px;background:var(--hair);}
+  .city-item{
+    border:0;border-radius:11px;height:var(--row-h);padding:0 4px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    background:rgba(35,30,23,.055);color:var(--ink);
+    font-family:inherit;font-size:12.5px;font-weight:560;letter-spacing:.01em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    transition:background .16s ease, transform .14s ease;
+  }
+  .city-item.on{background:var(--mango);color:#fff;font-weight:640;}
+  .city-item:active{transform:scale(.95);}
+  .sheet-actions{display:flex;gap:9px;position:relative;z-index:2;}
+  .sheet-done{
+    flex:1.5;height:50px;border-radius:16px;border:0;cursor:pointer;
+    background:var(--ink);color:#FFF9EC;font-family:inherit;
+    font-size:14.5px;font-weight:620;letter-spacing:.06em;
+    touch-action:manipulation;-webkit-user-select:none;user-select:none;
+  }
+  .sheet-done:active{opacity:.86;}
+  .sheet-close{
+    flex:1;height:50px;border-radius:16px;cursor:pointer;font-family:inherit;
+    background:rgba(35,30,23,.07);color:var(--ink);border:0;
+    box-shadow:0 0 0 1px rgba(35,30,23,.10) inset;
+    font-size:14.5px;font-weight:620;letter-spacing:.06em;
+    transition:background .16s ease, transform .14s ease;
+    touch-action:manipulation;-webkit-user-select:none;user-select:none;
+  }
+  .sheet-close:active{background:rgba(35,30,23,.13);transform:scale(.97);}
+
+  /* ---------- 墙纸弹窗 ---------- */
+  .modal{
+    position:absolute;inset:0;z-index:60;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:20px 22px calc(22px + env(safe-area-inset-bottom));
+    background:rgba(28,22,12,.55);
+    backdrop-filter:blur(16px) saturate(120%);
+    -webkit-backdrop-filter:blur(16px) saturate(120%);
+    opacity:0;pointer-events:none;transition:opacity .26s ease;
+  }
+  .modal.open{opacity:1;pointer-events:auto;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+  .modal-card{
+    width:100%;max-width:330px;max-height:100%;
+    display:flex;flex-direction:column;gap:13px;
+    transform:scale(.94);transition:transform .32s cubic-bezier(.32,.72,0,1);
+  }
+  .modal.open .modal-card{transform:scale(1);}
+  .frame{
+    position:relative;border-radius:22px;overflow:hidden;background:#fff;
+    box-shadow:0 26px 60px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.28);
+    width:100%;
+    max-width:calc(var(--app-h) * .52 * 1179 / 2556);
+    margin:0 auto;
+    flex:none;   /* 内容超高时不许被压缩，保证预览与导出图范围一致 */
+  }
+  /* 用 padding-top 撑出 9:19.5 比例（兼容微信 X5 等不支持 aspect-ratio 的内核） */
+  .frame::before{content:'';display:block;padding-top:216.7948%;}
+  .frame img{
+    position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:cover;
+    -webkit-user-drag:none;user-select:none;
+  }
+  .frame .loading-tint{
+    position:absolute;inset:0;background:rgba(252,250,246,.9);
+    display:grid;place-items:center;gap:8px;
+    font-size:12px;color:var(--ink-soft);letter-spacing:.16em;
+    transition:opacity .3s ease;
+  }
+  .frame .loading-tint.hide{opacity:0;pointer-events:none;}
+  .wall-text{
+    /* 固定在图片底部的一条文字带，底色跟随地块色 */
+    position:absolute;left:0;right:0;bottom:0;
+    /* 上下留白只留一点点：色带几乎贴着文字上下边界（随字号缩放） */
+    padding:.06em 5% calc(.08em + 1px);
+    background:var(--block,#3C3A38);
+    max-width:none;
+    font-weight:600;line-height:1.35;letter-spacing:.05em;
+    color:#fff;
+    text-align:center;
+    text-shadow:none;
+    outline:none;white-space:pre;word-break:keep-all;
+    user-select:text;-webkit-user-select:text;
+    z-index:3;
+    transition:background .28s ease;
+  }
+  .wall-text:empty::before{content:attr(data-ph);opacity:.6;}
+  .wall-text:focus{
+    box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.45);
+  }
+  .modal-bar{
+    display:flex;align-items:center;gap:8px;justify-content:flex-start;
+    padding:0 2px;
+  }
+  .toggle{
+    display:flex;align-items:center;gap:6px;
+    font-size:11px;color:rgba(255,255,255,.78);cursor:pointer;user-select:none;
+    white-space:nowrap;
+  }
+  .toggle i{
+    width:16px;height:16px;border-radius:5px;border:1.4px solid rgba(255,255,255,.5);
+    display:grid;place-items:center;font-style:normal;font-size:10px;color:transparent;
+    transition:.2s;
+  }
+  .toggle.on i{background:#FFF9EC;border-color:#FFF9EC;color:var(--mango-deep);}
+  .font-btn{
+    margin-left:auto;border:0;border-radius:999px;cursor:pointer;font-family:inherit;
+    font-size:11px;font-weight:600;letter-spacing:.02em;
+    padding:6px 12px;color:var(--mango-deep);background:#FFF9EC;
+    box-shadow:0 2px 8px rgba(0,0,0,.18);
+  }
+  .font-btn.on{background:var(--mango);color:#fff;}
+  .font-panel{
+    display:none;flex-direction:column;gap:8px;
+    background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.16);
+    border-radius:14px;padding:10px 12px;margin-top:2px;
+  }
+  .font-panel.open{display:flex;}
+  .fp-row{display:flex;align-items:center;gap:10px;}
+  .fp-label{font-size:11px;color:rgba(255,255,255,.66);width:26px;flex:none;}
+  .fp-opts{display:flex;gap:5px;flex-wrap:wrap;flex:1;}
+  .fp-opt{
+    border:1px solid rgba(255,255,255,.3);background:transparent;color:rgba(255,255,255,.82);
+    font-family:inherit;font-size:11px;padding:4px 9px;border-radius:999px;cursor:pointer;
+  }
+  .fp-opt.on{background:#FFF9EC;color:var(--mango-deep);border-color:#FFF9EC;font-weight:600;}
+  .fp-row input[type=range]{
+    flex:1;accent-color:var(--mango);height:20px;
+  }
+  .fp-colors{
+    display:grid;grid-template-columns:repeat(8, 21px);gap:6px;flex:1;
+    justify-content:start;
+  }
+  .fp-color{
+    width:21px;height:21px;border-radius:50%;cursor:pointer;
+    border:1.4px solid rgba(255,255,255,.4);
+    box-sizing:border-box;
+  }
+  .fp-color.on{border-color:#FFF9EC;box-shadow:0 0 0 2px rgba(255,249,236,.55);}
+  .fp-shuffle{grid-column:span 3;justify-self:start;white-space:nowrap;padding:3px 10px;}
+  .modal-actions{display:flex;gap:9px;}
+
+  /* ---------- 赞赏弹窗 ---------- */
+  .reward-modal{
+    position:absolute;inset:0;z-index:80;
+    display:flex;align-items:center;justify-content:center;padding:26px;
+    background:rgba(28,22,12,.55);
+    backdrop-filter:blur(16px) saturate(120%);
+    -webkit-backdrop-filter:blur(16px) saturate(120%);
+    opacity:0;pointer-events:none;transition:opacity .26s ease;
+  }
+  .reward-modal.open{opacity:1;pointer-events:auto;}
+  .reward-card{
+    width:100%;max-width:330px;
+    background:#FCFAF6;border-radius:24px;
+    padding:26px 22px 22px;
+    display:flex;flex-direction:column;align-items:center;gap:18px;
+    text-align:center;
+    box-shadow:0 26px 60px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.28);
+    transform:scale(.94);transition:transform .32s cubic-bezier(.32,.72,0,1);
+  }
+  .reward-modal.open .reward-card{transform:scale(1);}
+  .reward-card p{
+    margin:0;font-size:14px;line-height:1.8;color:var(--ink);letter-spacing:.02em;
+  }
+  .reward-go{
+    display:inline-flex;align-items:center;justify-content:center;
+    min-width:150px;height:48px;padding:0 26px;border-radius:16px;
+    background:var(--ink);color:#FFF9EC;
+    font-family:inherit;font-size:14.5px;font-weight:620;letter-spacing:.06em;
+    text-decoration:none;cursor:pointer;
+    touch-action:manipulation;-webkit-user-select:none;user-select:none;
+  }
+  .reward-go:active{opacity:.86;}
+  .m-btn{
+    flex:1;height:50px;border-radius:16px;border:0;font-family:inherit;
+    font-size:14px;font-weight:620;letter-spacing:.03em;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:7px;
+  }
+  .m-save{
+    flex:1.9;background:rgba(255,255,255,.94);
+    backdrop-filter:blur(16px) saturate(160%);
+    -webkit-backdrop-filter:blur(16px) saturate(160%);
+    color:var(--ink);
+    box-shadow:0 8px 22px rgba(0,0,0,.22), 0 0 0 1px rgba(255,255,255,.65) inset;
+  }
+  .m-save:active,.m-close:active{transform:scale(.97);}
+  .m-close{background:rgba(255,255,255,.16);color:#FFF9EC;box-shadow:0 0 0 1px rgba(255,255,255,.18) inset;}
+
+  /* ---------- 加载 ---------- */
+  .splash{
+    position:absolute;inset:0;z-index:80;background:#F0F0F0;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+    transition:opacity .5s ease;
+  }
+  .splash.hide{opacity:0;pointer-events:none;}
+  .splash .dot{
+    width:54px;height:54px;border-radius:50%;
+    background:radial-gradient(circle at 32% 28%, #C2C0BD, var(--dark) 55%, #6E6C69 100%);
+    box-shadow:0 12px 30px rgba(110,108,105,.28);
+    animation:rise 1.7s ease-in-out infinite;
+  }
+  @keyframes rise{0%,100%{transform:translateY(0) scale(1);}50%{transform:translateY(-9px) scale(1.03);}}
+  .splash p{margin:0;font-size:11px;letter-spacing:.28em;color:var(--ink-soft);text-transform:uppercase;}
+
+  /* ---------- Toast ---------- */
+  .toast{
+    position:absolute;left:50%;bottom:calc(94px + env(safe-area-inset-bottom));
+    transform:translate(-50%,10px);
+    max-width:78%;padding:10px 16px;border-radius:14px;
+    background:rgba(35,30,23,.86);color:#FFF9EC;
+    font-size:12px;line-height:1.5;text-align:center;letter-spacing:.02em;
+    opacity:0;pointer-events:none;transition:opacity .26s ease, transform .26s ease;
+    z-index:70;backdrop-filter:blur(10px);
+  }
+  .toast.show{opacity:1;transform:translate(-50%,0);}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div id="map"></div>
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <button class="rand-btn" id="randCityBtn" aria-label="随机切换国内城市">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1.5 3.2h2.2c1.6 0 2.2 5.6 3.8 5.6h2.4"/><path d="M8.4 1.4l1.6 1.8-1.6 1.8"/><path d="M1.5 8.8h1c1.4 0 2-3.2 3-4.4"/>
+        </svg>
+        随机国内
+      </button>
+      <button class="rand-btn" id="randWorldBtn" aria-label="随机切换国际城市">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+          <circle cx="6" cy="6" r="4.55"/><ellipse cx="6" cy="6" rx="2.1" ry="4.55"/><path d="M1.5 6h9"/>
+        </svg>
+        随机国际
+      </button>
+      <button class="tier-toggle" id="tierToggle" type="button" aria-expanded="false">简单</button>
+      <div class="tier-bar" id="tierBar"></div>
+    </div>
+    <div class="topbar-right">
+      <div class="brand" id="brandBtn">
+        <div>
+          <h1>芒果猜城市</h1>
+        </div>
+      </div>
+      <button class="guess-btn time-btn" id="timeBtn" type="button">限时挑战</button>
+      <button class="guess-btn" id="guessBtn" type="button">生成墙纸</button>
+      <button class="guess-btn" id="rewardBtn" type="button">赞赏作者</button>
+    </div>
+  </header>
+
+  <div class="city-name" id="cityName"></div>
+  <div class="city-name timer-pill" id="timerPill"></div>
+
+  <div class="sidebar">
+    <button class="ctrl" id="zoomIn" aria-label="放大">
+      <svg width="17" height="17" viewBox="0 0 17 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <path d="M8.5 3.2v10.6M3.2 8.5h10.6"/>
+      </svg>
+    </button>
+    <button class="ctrl" id="zoomOut" aria-label="缩小">
+      <svg width="17" height="17" viewBox="0 0 17 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <path d="M3.2 8.5h10.6"/>
+      </svg>
+    </button>
+    <button class="ctrl" id="locateBtn" aria-label="回到我的位置">
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+        <circle cx="10" cy="10" r="5.4"/><circle cx="10" cy="10" r="1.5" fill="currentColor" stroke="none"/>
+        <path d="M10 1.4v2.6M10 16v2.6M1.4 10h2.6M16 10h2.6" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="bottombar">
+    <button class="btn btn-ghost" id="colorBtn">
+      <span class="swatch" id="swatch"></span><span>颜色</span>
+    </button>
+    <button class="btn btn-ghost" id="cityBtn">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 1.8c2.4 0 4.4 2 4.4 4.4 0 3.2-4.4 7.2-4.4 7.2S3.6 9.4 3.6 6.2C3.6 3.8 5.6 1.8 8 1.8z"/>
+        <circle cx="8" cy="6.2" r="1.6"/>
+      </svg>
+      <span>城市</span>
+    </button>
+    <button class="btn btn-primary" id="wallBtn">
+      <svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 1.6l1.55 3.7 3.7 1.55-3.7 1.55L9 12.1 7.45 8.4l-3.7-1.55 3.7-1.55L9 1.6z"/>
+        <path d="M14.2 11.4l.7 1.65 1.65.7-1.65.7-.7 1.65-.7-1.65-1.65-.7 1.65-.7.7-1.65z"/>
+      </svg>
+      生成墙纸
+    </button>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+
+  <section class="sheet" id="sheet" aria-hidden="true">
+    <div class="sheet-grip"></div>
+    <div class="sheet-hd">
+      <h2>颜色</h2>
+      <button class="shuffle" id="shuffleBtn">
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1.5 3.2h2.2c1.6 0 2.2 5.6 3.8 5.6h2.4"/><path d="M8.4 1.4l1.6 1.8-1.6 1.8"/><path d="M1.5 8.8h1c1.4 0 2-3.2 3-4.4"/>
+        </svg>
+        随机
+      </button>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="sheet-actions">
+      <button class="sheet-close" id="sheetClose">关闭</button>
+      <button class="sheet-done" id="sheetDone">完成</button>
+    </div>
+  </section>
+
+  <section class="sheet" id="citySheet" aria-hidden="true">
+    <div class="sheet-grip"></div>
+    <div class="sheet-hd">
+      <h2>城市</h2>
+      <button class="shuffle" id="cityShuffle">
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+          <path d="M1.6 2.9h8.8M1.6 6h5.6M1.6 9.1h2.8"/>
+        </svg>
+        排序
+      </button>
+    </div>
+    <div class="city-grid" id="cityGrid"></div>
+    <div class="sheet-actions">
+      <button class="sheet-close" id="cityClose">关闭</button>
+      <button class="sheet-done" id="cityDone">完成</button>
+    </div>
+  </section>
+
+  <section class="reward-modal" id="rewardModal" aria-hidden="true">
+    <div class="reward-card">
+      <p>本小游戏免费<br>如果喜欢可以赞赏作者<br>用于维护服务器<br>感谢您的支持！<br>作者：陈芒果</p>
+      <a class="reward-go" href="https://mp.weixin.qq.com/s/vxHvFbqT-wWHY03Sqlsg-g" target="_blank" rel="noopener">赞赏作者</a>
+    </div>
+  </section>
+
+  <div class="modal" id="wallModal">
+    <div class="modal-card">
+      <div class="frame" id="frame">
+        <img id="wallImg" alt="生成的墙纸预览" />
+        <div class="wall-text" id="wallText" contenteditable="true" spellcheck="false" data-ph="点击输入文字"></div>
+        <div class="loading-tint" id="wallLoading">生成中…</div>
+      </div>
+      <div class="modal-bar">
+        <div class="toggle" id="textToggle"><i>✓</i>文字</div>
+        <button class="font-btn" id="fontBtn" type="button">Aa 字体</button>
+      </div>
+      <div class="font-panel" id="fontPanel">
+        <div class="fp-row">
+          <span class="fp-label">中文</span>
+          <div class="fp-opts" id="fontFamCN"></div>
+        </div>
+        <div class="fp-row">
+          <span class="fp-label">英文</span>
+          <div class="fp-opts" id="fontFamEN"></div>
+        </div>
+        <div class="fp-row">
+          <span class="fp-label">大小</span>
+          <input type="range" id="fontSize" min="45" max="280" value="108" />
+        </div>
+        <div class="fp-row">
+          <span class="fp-label">颜色</span>
+          <div class="fp-colors" id="fontColors"></div>
+        </div>
+      </div>
+      <div class="modal-bar">
+        <div class="toggle" id="locToggle"><i>✓</i>定位</div>
+      </div>
+      <div class="modal-actions">
+        <button class="m-btn m-close" id="closeModal">关闭</button>
+        <button class="m-btn m-save" id="saveBtn">
+          <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 2.2v9.2M5.2 8.2L9 12l3.8-3.8M3 14.6h12"/>
+          </svg>
+          保存到相册
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="splash" id="splash">
+    <div class="dot"></div>
+    <p>Mango Map</p>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="quiz" id="quiz" aria-hidden="true"></div>
+
+  <div class="quiz-final" id="quizFinal" aria-hidden="true">
+    <div class="qf-qr" id="qfQr"><img id="qrImg" alt="扫码打开芒果猜城市"><span>扫码一起玩</span></div>
+    <div class="qf-line" id="qfLine"></div>
+    <button class="quiz-share" id="quizShare" type="button"></button>
+  </div>
+</div>
+
+<script type="module">
+// 等压缩的 MapLibre 解压注入完成再跑主逻辑（老内核会回落原始文件）
+await loadMapLibre();
+(function(){
+  "use strict";
+
+  /* ============ 配色：12 列 × 10 行 = 120 ============ */
+  // 第 1 行：12 级灰阶（白 → 黑）
+  // 第 2~10 行：12 组色相（青 → 蓝 → 靛 → 紫 → 洋红 → 红 → 橙红 → 橙 → 琥珀 → 黄 → 黄绿 → 绿），
+  //             自上而下由深到浅；末行为近白淡彩
+  const PALETTE = [
+    ['#FFFFFF','#EBEBEB','#D6D6D6','#C1C1C1','#ACACAC','#999999','#858585','#707070','#5C5C5C','#474747','#333333','#000000'],
+    ['#023749','#021E57','#12053B','#30063F','#3C061B','#5D0802','#5A1B00','#583201','#573D02','#686102','#505507','#263E10'],
+    ['#044B65','#012F7C','#190A52','#450C57','#551029','#821001','#7B2900','#7A4A00','#795802','#8D8505','#6F750B','#39571A'],
+    ['#026F90','#0241A8','#2C0977','#60187C','#79193D','#B61902','#AC3E01','#AA6702','#A67804','#C4BC00','#9CA50E','#4F7A26'],
+    ['#028BB5','#0155D8','#381B95','#7A229E','#992450','#E12402','#DB5101','#D28302','#D19C02','#F6EC02','#C2D017','#679B34'],
+    ['#049FD7','#0260FF','#4E23B3','#9829BB','#B92C5C','#FF3F18','#FF6B00','#FEA904','#FEC601','#FEFA41','#D8EB37','#76BB3F'],
+    ['#07C5FD','#3A87FD','#5E30EC','#C039F2','#E53B7A','#FE6050','#FF8648','#FCB43D','#FECB3F','#FFF769','#E5EE66','#95D25F'],
+    ['#50D5FB','#75A4FF','#864DFE','#D256FE','#EF719F','#FE8B81','#FEA57D','#FFC778','#FFD977','#FEF992','#EAF28E','#B1DC8B'],
+    ['#91E2FC','#A7C6FF','#B18BFF','#E28FFE','#F4A3C1','#FFB4AF','#FEC5AA','#FFD9A8','#FFE4A8','#FEFBB9','#F2F6B6','#CDE8B5'],
+    ['#CBEFFF','#D2E1FF','#D8C8FF','#EECAFF','#F8D2DF','#FEDBD7','#FFE1D6','#FDEBD4','#FFF1D3','#FFFCDC','#F7F9DB','#DDEDD4']
+  ];
+  const PAL_ROWS = PALETTE.length;        // 10
+  const PAL_COLS = PALETTE[0].length;     // 12
+  const DEFAULT_BLOCK = '#3C3A38';
+  const LAND = DEFAULT_BLOCK;
+  const PAPER = '#FFFFFF';          // 街道 / 河流 / 公园
+  // 每次打开随机取一个地块色：任意色相列 × 第 2~9 行（跳过最浅一行，
+  // 否则白街道和浅色地块几乎融在一起，地图会"隐形"）
+  const randomBlockColor = ()=>{
+    const c = Math.floor(Math.random()*PAL_COLS);
+    const r = 1 + Math.floor(Math.random()*(PAL_ROWS - 2));
+    return PALETTE[r][c];
+  };
+  let blockColor = randomBlockColor();
+
+  /* ============ 地图样式：只有图底关系，无任何文字与符号 ============ */
+  function roadWidth(ramp){
+    const expr = ['interpolate',['exponential',1.55],['zoom']];
+    ramp.forEach(p => expr.push(p[0], p[1]));
+    return expr;
+  }
+  const MINOR = ['minor','service','track','path','raceway','busway','taxiway','runway'];
+  const MED   = ['tertiary','secondary','tertiary_link','secondary_link'];
+  const MAJOR = ['motorway','trunk','primary','motorway_link','trunk_link','primary_link'];
+
+  // 当前城市瓦片包所在的层级（单层包）。source.maxzoom 跟着它走，
+  // 放大时 MapLibre 就只会 overzoom 这一层，不会再要更高层级的瓦片。
+  let srcMaxZoom = 14;
+  let mapRef = null;
+
+  /* 每座城市瓦片包的「最细层级」（按 id 顺序；重建包后要同步）。
+     source.maxzoom 锁在这一层：放大时 MapLibre 最多请求到它，再往上就 overzoom。
+     多层金字塔包（北京/上海等，2026-11-16）里还含基础层..12 的中间层，
+     MapLibre 会随缩放自动在层间切换，基础层级无需在此登记。 */
+  const PACK_ZOOM = [12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12];
+
+  // 统一改层级：改 source.maxzoom 后让 MapLibre 下一帧按新层级重新覆盖瓦片。
+  // 不清空瓦片缓存——飞行途中旧瓦片还能接着显示，避免「切城市先白一下」；
+  // 层级不同时新瓦片的 key 也不同，不会复用之前 errored 的那批。
+  function setSrcZoom(z){
+    if(!Number.isFinite(z) || z === srcMaxZoom) return false;
+    srcMaxZoom = z;
+    try{
+      if(mapRef){
+        const s = mapRef.getSource('omt');
+        if(s) s.maxzoom = z;
+        mapRef.triggerRepaint();
+      }
+    }catch(e){ /* 样式还没建好时，buildStyle / map.on('load') 会补齐 */ }
+    return true;
+  }
+
+  function buildStyle(color){
+    return {
+      version: 8,
+      name: 'Mango Figma',
+      sources: {
+        omt: {
+          type: 'vector',
+          // 自托管瓦片包（mango:// 由 addProtocol 接管），包外区域回落官方源
+          tiles: ['mango://{z}/{x}/{y}'],
+          minzoom: 0, maxzoom: srcMaxZoom,
+          tileSize: 512
+        }
+      },
+      layers: [
+        /* —— 地块（道路围合出来的底色）：可选 64 色，深灰为默认 —— */
+        { id:'paper', type:'background', paint:{ 'background-color': color } },
+
+        /* —— 公园 / 林地 / 绿地不再单独填色，与普通地块一致；
+              园内的道路、水体仍由下面的道路 / 水系图层画成白色 —— */
+
+        /* —— 水域：白 —— */
+        { id:'water', type:'fill', source:'omt', 'source-layer':'water',
+          paint:{ 'fill-color': PAPER, 'fill-opacity': 1 } },
+
+        /* —— 街道：白色线条，切出干净的路网 —— */
+        { id:'road-minor', type:'line', source:'omt', 'source-layer':'transportation',
+          filter:['in',['get','class'],['literal',MINOR]],
+          layout:{ 'line-cap':'round', 'line-join':'round' },
+          paint:{ 'line-color': PAPER, 'line-width': roadWidth([[13,0.5],[15,1.5],[17,3.6],[19,9.6]]),
+                  'line-opacity': 1 } },
+        { id:'road-med', type:'line', source:'omt', 'source-layer':'transportation',
+          filter:['in',['get','class'],['literal',MED]],
+          layout:{ 'line-cap':'round', 'line-join':'round' },
+          paint:{ 'line-color': PAPER, 'line-width': roadWidth([[11,0.5],[13,1.2],[16,3.6],[19,11]]),
+                  'line-opacity': 1 } },
+        { id:'road-rail', type:'line', source:'omt', 'source-layer':'transportation',
+          filter:['==',['get','class'],'rail'],
+          layout:{ 'line-cap':'butt', 'line-join':'round' },
+          paint:{ 'line-color': PAPER, 'line-width': roadWidth([[12,0.6],[15,1.2],[18,3.2]]),
+                  'line-opacity': 0.9 } },
+        { id:'road-major', type:'line', source:'omt', 'source-layer':'transportation',
+          filter:['in',['get','class'],['literal',MAJOR]],
+          layout:{ 'line-cap':'round', 'line-join':'round' },
+          paint:{ 'line-color': PAPER, 'line-width': roadWidth([[8,0.6],[12,1.5],[16,5],[19,14]]),
+                  'line-opacity': 1 } },
+
+        /* —— 河流 / 运河中心线：白 —— */
+        { id:'waterway', type:'line', source:'omt', 'source-layer':'waterway',
+          layout:{ 'line-cap':'round', 'line-join':'round' },
+          paint:{ 'line-color': PAPER,
+                  'line-width': ['interpolate',['exponential',1.4],['zoom'],
+                    10, ['match',['get','class'],['river','canal'], 1.0, 0.6],
+                    13, ['match',['get','class'],['river','canal'], 2.8, 1.2],
+                    16, ['match',['get','class'],['river','canal'], 9, 2.4],
+                    19, ['match',['get','class'],['river','canal'], 34, 8]
+                  ] } },
+
+        /* —— 机场跑道：白 —— */
+        { id:'aeroway', type:'line', source:'omt', 'source-layer':'aeroway',
+          filter:['in',['get','class'],['literal',['runway','taxiway']]],
+          layout:{ 'line-cap':'round' },
+          paint:{ 'line-color': PAPER, 'line-width': roadWidth([[10,1],[14,4],[18,10]]) } }
+      ]
+    };
+  }
+
+  /* ============ 地图初始化 ============ */
+  /* ============ 城市库：四档题库（简单 / 中等 / 困难 / 国际） ============ */
+  // [名称, lng, lat, 城市跨度km]
+  const CN_SIMPLE = [
+    ['石家庄',114.5149,38.0428,55], ['太原',112.5490,37.8570,52], ['沈阳',123.4315,41.8057,52],
+    ['长春',125.3235,43.8171,50], ['哈尔滨',126.5349,45.8038,52], ['南京',118.7969,32.0603,55],
+    ['杭州',120.1551,30.2741,60], ['合肥',117.2272,31.8206,52], ['福州',119.2965,26.0745,46],
+    ['南昌',115.8582,28.6820,48], ['济南',117.1201,36.6512,52], ['郑州',113.6254,34.7466,52],
+    ['武汉',114.3055,30.5928,60], ['长沙',112.9388,28.2282,52], ['广州',113.2644,23.1291,58],
+    ['海口',110.1999,20.0444,40], ['成都',104.0668,30.5728,66], ['贵阳',106.6302,26.6477,45],
+    ['昆明',102.8329,24.8801,52], ['西安',108.9398,34.3416,56], ['兰州',103.8343,36.0611,45],
+    ['台北',121.5654,25.0330,40], ['呼和浩特',111.7492,40.8426,45], ['南宁',108.3665,22.8170,45],
+    ['拉萨',91.1409,29.6456,35], ['乌鲁木齐',87.6168,43.8256,50], ['北京',116.4074,39.9042,78],
+    ['天津',117.2009,39.0842,72], ['上海',121.4737,31.2304,72], ['重庆',106.5516,29.5630,92],
+    ['香港',114.1694,22.3193,36], ['澳门',113.5439,22.1987,22], ['深圳',114.0579,22.5431,46],
+    ['苏州',120.5853,31.2989,56], ['宁波',121.5440,29.8683,55], ['青岛',120.3826,36.0671,56],
+    ['大连',121.6147,38.9140,46], ['厦门',118.0894,24.4798,36], ['西宁',101.7782,36.6171,38],
+    ['银川',106.2325,38.4864,38]
+  ];
+  const CN_MEDIUM_EXTRA = [
+    ['桂林',110.2991,25.2736,38], ['三亚',109.5083,18.2528,34], ['洛阳',112.4540,34.6187,40],
+    ['张家界',110.4799,29.1174,21], ['丽江',100.2299,26.8721,21], ['大理',100.2676,25.6065,22],
+    ['黄山',118.3387,29.7141,21], ['扬州',119.4117,32.3932,38], ['无锡',120.3119,31.4912,44],
+    ['绍兴',120.5820,29.9990,38], ['开封',114.3410,34.7972,36], ['泉州',118.6757,24.8741,42],
+    ['大同',113.3001,40.0768,42], ['岳阳',113.1290,29.3570,36], ['敦煌',94.6618,40.1421,18],
+    ['威海',122.1204,37.5131,36], ['日照',119.5269,35.4164,34], ['烟台',121.4479,37.4638,46],
+    ['嘉兴',120.7555,30.7461,36], ['景德镇',117.1784,29.2688,21], ['上饶',117.9433,28.4548,21],
+    ['曲阜',116.9865,35.5810,20], ['襄阳',112.1220,32.0090,40], ['恩施',109.4879,30.2721,21],
+    ['北海',109.1194,21.4813,22], ['乐山',103.7656,29.5521,34], ['宜宾',104.6430,28.7517,34],
+    ['临汾',111.5189,36.0880,32], ['南阳',112.5284,32.9908,40], ['喀什',75.9898,39.4677,32],
+    ['盐城',120.1396,33.3776,40], ['佛山',113.1214,23.0219,40], ['南通',120.8943,31.9802,45],
+    ['东莞',113.7518,23.0207,40], ['常州',119.9741,31.8107,40], ['唐山',118.1802,39.6305,46],
+    ['温州',120.6994,27.9938,42], ['徐州',117.2848,34.2058,46], ['珠海',113.5767,22.2707,34],
+    ['延安',109.4898,36.5853,19]
+  ];
+  const CN_HARD_EXTRA = [
+    ['鄂尔多斯',109.7810,39.6086,40], ['金华',119.6474,29.0790,36], ['台州',121.4208,28.6564,36],
+    ['榆林',109.7346,38.2852,19], ['宜昌',111.2865,30.6919,36], ['镇江',119.4250,32.1879,34],
+    ['淮安',119.0213,33.6104,34], ['包头',109.8403,40.6574,40], ['淄博',118.0476,36.8142,36],
+    ['泰州',119.9152,32.4849,34], ['惠州',114.4161,23.1115,36], ['临沂',118.3564,35.1046,38],
+    ['沧州',116.8388,38.3045,36], ['保定',115.4646,38.8739,38], ['商丘',115.6505,34.4370,34],
+    ['连云港',119.2216,34.5967,34], ['潍坊',119.1617,36.7069,40], ['漳州',117.6471,24.5130,36],
+    ['湛江',110.3594,21.2707,36], ['茂名',110.9255,21.6629,34], ['绵阳',104.6791,31.4675,36],
+    ['德阳',104.3981,31.1270,32], ['滨州',117.9707,37.3820,34], ['东营',118.6746,37.4340,34],
+    ['德州',116.3575,37.4355,36], ['肇庆',112.4653,23.0469,34], ['龙岩',117.0173,25.0751,22],
+    ['株洲',113.1340,27.8274,34], ['湘潭',112.9441,27.8297,32], ['许昌',113.8526,34.0357,32],
+    ['济宁',116.5871,35.4154,36], ['泰安',117.0879,36.2003,32], ['柳州',109.4281,24.3264,36],
+    ['芜湖',118.4329,31.3525,34], ['菏泽',115.4807,35.2333,34], ['枣庄',117.3237,34.8107,32],
+    ['廊坊',116.6836,39.5383,34], ['常德',111.6987,29.0316,32], ['汉中',107.0238,33.0677,20],
+    ['平遥',112.1763,37.1896,19]
+  ];
+  const WORLD_CITIES_RAW = [
+    ['纽约',-74.0060,40.7128,58], ['东京',139.6503,35.6762,80], ['洛杉矶',-118.2437,34.0522,88],
+    ['伦敦',-0.1278,51.5074,56], ['巴黎',2.3522,48.8566,50], ['芝加哥',-87.6298,41.8781,56],
+    ['首尔',126.9780,37.5665,46], ['旧金山',-122.4194,37.7749,46], ['达拉斯',-96.7970,32.7767,56],
+    ['休斯顿',-95.3698,29.7604,56], ['华盛顿',-77.0369,38.9072,46], ['波士顿',-71.0589,42.3601,42],
+    ['新加坡',103.8198,1.3521,36], ['费城',-75.1652,39.9526,42], ['亚特兰大',-84.3880,33.7490,50],
+    ['西雅图',-122.3321,47.6062,46], ['迈阿密',-80.1918,25.7617,44], ['多伦多',-79.3832,43.6532,50],
+    ['圣何塞',-121.8863,37.3382,32], ['大阪',135.5023,34.6937,46], ['悉尼',151.2093,-33.8688,20],
+    ['柏林',13.4050,52.5200,44], ['法兰克福',8.6821,50.1109,40], ['墨西哥城',-99.1332,19.4326,56],
+    ['马德里',-3.7038,40.4168,42], ['名古屋',136.9066,35.1815,36], ['孟买',72.8777,19.0760,46],
+    ['雅加达',106.8456,-6.2088,46], ['圣保罗',-46.6333,-23.5505,56], ['里约热内卢',-43.1729,-22.9068,46],
+    ['曼谷',100.5018,13.7563,46], ['墨尔本',144.9631,-37.8136,48], ['凤凰城',-112.0740,33.4484,52],
+    ['迪拜',55.2708,25.2048,46], ['苏黎世',8.5417,47.3769,16], ['奥斯陆',10.7522,59.9139,34],
+    ['布宜诺斯艾利斯',-58.3816,-34.6037,48], ['吉隆坡',101.6869,3.1390,42], ['巴塞罗那',2.1734,41.3851,18],
+    ['圣路易斯',-90.1994,38.6270,42]
+  ];
+
+  // 城市 id = 在「简单+中等+困难+国际」全表中的位置，用来对应自托管的瓦片包 tiles/c<id>.bin
+  const CITY_INDEX = new Map();
+  CN_SIMPLE.concat(CN_MEDIUM_EXTRA, CN_HARD_EXTRA, WORLD_CITIES_RAW)
+    .forEach((a, i)=>{ if(!CITY_INDEX.has(a[0])) CITY_INDEX.set(a[0], i); });
+  const toCities = arr => arr.map(a=>({
+    name: a[0], c: [a[1], a[2]], s: a[3], id: CITY_INDEX.get(a[0])
+  }));
+  const SIMPLE_CITIES = toCities(CN_SIMPLE);
+  const MEDIUM_CITIES = toCities(CN_SIMPLE.concat(CN_MEDIUM_EXTRA));
+  const HARD_CITIES   = toCities(CN_SIMPLE.concat(CN_MEDIUM_EXTRA, CN_HARD_EXTRA));
+  const WORLD_CITIES  = toCities(WORLD_CITIES_RAW);
+
+  // 城市名 → 拼音（无音调）：城市面板「排序」用，不依赖浏览器 pinyin collation
+  const CITY_PINYIN = {'三亚':'sanya', '上海':'shanghai', '上饶':'shangrao', '东京':'dongjing', '东莞':'dongguan', '东营':'dongying', '临汾':'linfen', '临沂':'linyi', '丽江':'lijiang', '乌鲁木齐':'wulumuqi', '乐山':'leshan', '亚特兰大':'yatelanda', '休斯顿':'xiusidun', '伦敦':'lundun', '佛山':'foshan', '保定':'baoding', '兰州':'lanzhou', '凤凰城':'fenghuangcheng', '包头':'baotou', '北京':'beijing', '北海':'beihai', '华盛顿':'huashengdun', '南京':'nanjing', '南宁':'nanning', '南昌':'nanchang', '南通':'nantong', '南阳':'nanyang', '厦门':'xiamen', '台北':'taibei', '台州':'taizhou', '合肥':'hefei', '吉隆坡':'jilongpo', '名古屋':'mingguwu', '呼和浩特':'huhehaote', '哈尔滨':'haerbin', '唐山':'tangshan', '商丘':'shangqiu', '喀什':'kashi', '嘉兴':'jiaxing', '圣何塞':'shenghesai', '圣保罗':'shengbaoluo', '圣路易斯':'shengluyisi', '墨尔本':'moerben', '墨西哥城':'moxigecheng', '多伦多':'duolunduo', '大同':'datong', '大理':'dali', '大连':'dalian', '大阪':'daban', '天津':'tianjin', '太原':'taiyuan', '奥斯陆':'aosilu', '威海':'weihai', '孟买':'mengmai', '宁波':'ningbo', '宜宾':'yibin', '宜昌':'yichang', '岳阳':'yueyang', '巴塞罗那':'basailuona', '巴黎':'bali', '布宜诺斯艾利斯':'buyinuosiailisi', '常州':'changzhou', '常德':'changde', '平遥':'pingyao', '广州':'guangzhou', '廊坊':'langfang', '延安':'yanan', '开封':'kaifeng', '张家界':'zhangjiajie', '徐州':'xuzhou', '德州':'dezhou', '德阳':'deyang', '恩施':'enshi', '悉尼':'xini', '惠州':'huizhou', '成都':'chengdu', '扬州':'yangzhou', '拉萨':'lasa', '敦煌':'dunhuang', '新加坡':'xinjiapo', '无锡':'wuxi', '日照':'rizhao', '旧金山':'jiujinshan', '昆明':'kunming', '景德镇':'jingdezhen', '曲阜':'qufu', '曼谷':'mangu', '杭州':'hangzhou', '枣庄':'zaozhuang', '柏林':'bolin', '柳州':'liuzhou', '株洲':'zhuzhou', '桂林':'guilin', '榆林':'yulin', '武汉':'wuhan', '汉中':'hanzhong', '沈阳':'shenyang', '沧州':'cangzhou', '泉州':'quanzhou', '法兰克福':'falankefu', '波士顿':'boshidun', '泰安':'taian', '泰州':'taizhou', '洛杉矶':'luoshanji', '洛阳':'luoyang', '济南':'jinan', '济宁':'jining', '海口':'haikou', '淄博':'zibo', '淮安':'huaian', '深圳':'shenzhen', '温州':'wenzhou', '湘潭':'xiangtan', '湛江':'zhanjiang', '滨州':'binzhou', '漳州':'zhangzhou', '潍坊':'weifang', '澳门':'aomen', '烟台':'yantai', '珠海':'zhuhai', '盐城':'yancheng', '石家庄':'shijiazhuang', '福州':'fuzhou', '纽约':'niuyue', '绍兴':'shaoxing', '绵阳':'mianyang', '肇庆':'zhaoqing', '芜湖':'wuhu', '芝加哥':'zhijiage', '苏州':'suzhou', '苏黎世':'sulishi', '茂名':'maoming', '菏泽':'heze', '襄阳':'xiangyang', '西宁':'xining', '西安':'xian', '西雅图':'xiyatu', '许昌':'xuchang', '贵阳':'guiyang', '费城':'feicheng', '达拉斯':'dalasi', '迈阿密':'maiami', '连云港':'lianyungang', '迪拜':'dibai', '郑州':'zhengzhou', '鄂尔多斯':'eerduosi', '里约热内卢':'liyuereneilu', '重庆':'chongqing', '金华':'jinhua', '银川':'yinchuan', '镇江':'zhenjiang', '长春':'changchun', '长沙':'changsha', '雅加达':'yajiada', '青岛':'qingdao', '首尔':'shouer', '香港':'xianggang', '马德里':'madeli', '黄山':'huangshan', '龙岩':'longyan'};
+
+  // 四档题库：简单 ⊂ 中等 ⊂ 困难；国际独立
+  const TIERS = [
+    { key:'easy',   label:'简单', pool: SIMPLE_CITIES },
+    { key:'medium', label:'中等', pool: MEDIUM_CITIES },
+    { key:'hard',   label:'困难', pool: HARD_CITIES },
+    { key:'world',  label:'国际', pool: WORLD_CITIES }
+  ];
+  let activeTier = TIERS[0];
+
+  function viewWidthPx(){
+    const el = document.getElementById('map');
+    return (el && el.clientWidth) || 393;
+  }
+  // 按"城市跨度"换算成能看清全貌的缩放级别
+  function zoomForSpan(km, lat){
+    const mPerPx = km * 1000 / viewWidthPx();
+    return Math.log2(156543.03392 * Math.cos(lat * Math.PI / 180) / mPerPx);
+  }
+  // 全貌再放大一级 → 需要缩小一级才能看到城市全貌
+  const cityZoom = city => Math.max(4, Math.min(15.5, zoomForSpan(city.s, city.c[1]) + 1));
+
+  /* ============ 初始视角：每次打开随机一座城市 ============ */
+  const q = new URLSearchParams(location.search);
+  const bootCity = (!q.get('lat') || !q.get('lng'))
+    ? HARD_CITIES[Math.floor(Math.random() * HARD_CITIES.length)]   // 首屏随机城市也用「困难」档 120 城
+    : null;
+  const bootCenter = bootCity ? bootCity.c : [parseFloat(q.get('lng')), parseFloat(q.get('lat'))];
+  const bootZoom = q.get('z') ? parseFloat(q.get('z')) : (bootCity ? cityZoom(bootCity) : 12);
+
+  /* ============ 自托管瓦片包 ============
+     每座城市一份 tiles/c<id>.bin（gzip）：magic + 索引 + 拼好的矢量瓦片。
+     用自定义协议 mango:// 从内存里直接取，不再逐块访问海外 CDN。
+     包外区域（拖到城市边缘、缩小看省界）才回落官方源。 */
+  const PACK_MAGIC = 'MGT1';
+  const PACK_KEEP = 5;                       // 内存里最多留几份包（每份解压后约 0.4MB）
+  const packCache = new Map();               // id -> {idx, data}
+  const packPending = new Map();             // id -> Promise
+  let activePackId = (bootCity && bootCity.id != null) ? bootCity.id : -1;
+  if(activePackId < 0 && bootCenter){
+    // 用 ?lat=&lng= 打开（分享链接）时，就近找一座城市的包来用
+    let best = -1, bestD = 1.0;
+    HARD_CITIES.concat(WORLD_CITIES).forEach(c=>{
+      const d = Math.abs(c.c[0] - bootCenter[0]) + Math.abs(c.c[1] - bootCenter[1]);
+      if(d < bestD){ bestD = d; best = c.id; }
+    });
+    activePackId = best;
+  }
+
+  function parsePack(buf){
+    const u8 = new Uint8Array(buf);
+    if(u8.length < 9) return null;
+    if(String.fromCharCode(u8[0], u8[1], u8[2], u8[3]) !== PACK_MAGIC) return null;
+    const idxLen = (u8[4] | (u8[5] << 8) | (u8[6] << 16) | (u8[7] << 24)) >>> 0;
+    const idx = JSON.parse(new TextDecoder().decode(u8.subarray(8, 8 + idxLen)));
+    return { idx, data: u8.subarray(8 + idxLen) };
+  }
+
+  /* 解压瓦片包：新内核用 DecompressionStream；老内核（微信 X5 / 旧版 iOS）
+     自动补一个 pako(45KB) 纯 JS 解压。以前老内核会直接放弃整个包，
+     导致所有瓦片都跑去境外兜底 → 地图出现大块纯色。 */
+  let pakoPending = null;
+  function pakoInflate(buf){
+    if(!pakoPending){
+      pakoPending = window.pako ? Promise.resolve() : new Promise((res, rej)=>{
+        const s = document.createElement('script');
+        s.src = 'vendor/pako.min.js'; s.onload = res; s.onerror = rej;
+        document.head.appendChild(s);
+      });
+    }
+    return pakoPending.then(()=>{
+      if(!window.pako) throw new Error('pako unavailable');
+      return window.pako.inflate(new Uint8Array(buf));   // 返回 Uint8Array
+    });
+  }
+  function gunzip(buf){
+    if(typeof DecompressionStream !== 'undefined'){
+      try{
+        const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
+        return new Response(stream).arrayBuffer().catch(()=> pakoInflate(buf));
+      }catch(e){ /* 落到 pako */ }
+    }
+    return pakoInflate(buf);
+  }
+
+  /* 单层包只含一层 z0；金字塔包含 z0..12 多层。无论哪种，source.maxzoom
+     都锁在包内最细层级：放大超过它时 MapLibre 只 overzoom 最细层，
+     不会再请求包里不存在的更高层级（否则会翻出缓存里的别层瓦片拼出分界）。 */
+  /* 包内可能含多层（金字塔包 z0..12）。source.maxzoom 要锁在「最细」那一层，
+     中间层由 MapLibre 随缩放自动切换，不需要额外处理。 */
+  function applyPackZoom(pack){
+    if(!pack) return;
+    let zmax = 0;
+    for(const k of Object.keys(pack.idx)){
+      const v = +k.split('/')[0];
+      if(v > zmax) zmax = v;
+    }
+    if(zmax) setSrcZoom(zmax);
+  }
+
+  const packGone = new Set();        // 404 的城市包，本次会话不再请求
+  const packRetryAt = new Map();     // 网络失败的包，冷却几秒再试（避免同一个包被反复重下）
+  function loadPack(id){
+    if(id == null || id < 0) return Promise.resolve(null);
+    if(packCache.has(id)){
+      // 缓存命中（含答题预取）也必须校准层级：以前这里直接返回，
+      // 导致切到「已缓存且层级不同」的城市时 maxzoom 卡在旧值、整屏空白
+      if(id === activePackId) applyPackZoom(packCache.get(id));
+      return Promise.resolve(packCache.get(id));
+    }
+    if(packPending.has(id)) return packPending.get(id);
+    if(packGone.has(id) || (packRetryAt.get(id) || 0) > Date.now()) return Promise.resolve(null);
+    // 瓦片数据重打包后 bump 这个版本串：换 URL 可绕开手机里可能残留的旧缓存
+    const p = fetch('tiles/c' + id + '.bin?v=20261116rule', { credentials: 'omit' })
+      .then(r => {
+        if(!r.ok){ if(r.status === 404) packGone.add(id); throw new Error('pack ' + r.status); }
+        return r.arrayBuffer();
+      })
+      .then(gunzip)
+      .then(plain => (plain ? parsePack(plain) : null))
+      .then(pack => {
+        if(pack){
+          // 访问过的往前提，便于 LRU 淘汰
+          packCache.delete(id);
+          packCache.set(id, pack);
+          while(packCache.size > PACK_KEEP) packCache.delete(packCache.keys().next().value);
+          if(id === activePackId) applyPackZoom(pack);
+        }else{
+          packRetryAt.set(id, Date.now() + 4000);
+        }
+        return pack;
+      })
+      .catch(()=>{ packRetryAt.set(id, Date.now() + 4000); return null; })
+      .then(pack => { packPending.delete(id); return pack; });
+    packPending.set(id, p);
+    return p;
+  }
+
+  function packTile(z, x, y){
+    const key = z + '/' + x + '/' + y;
+    const order = [activePackId];
+    packCache.forEach((_v, k)=>{ if(k !== activePackId) order.push(k); });
+    for(const id of order){
+      const p = packCache.get(id);
+      if(!p) continue;
+      const e = p.idx[key];
+      if(e) return p.data.slice(e[0], e[0] + e[1]);      // slice 复制成独立 buffer
+    }
+    return null;
+  }
+
+  /* 兜底补「包外区域」：包只覆盖城市周边，平移/缩放超出覆盖框时，向境外源要
+     「同层级」的原始瓦片 —— 层级一致，整屏详略相同，不会出现分界线。
+     （2026-11-16 前的限制 z < srcMaxZoom 是为单层包设计的；多层包的 z12 细节层
+     只铺一屏，包外平移若不用兜底，会退回父级 overzoom，出现粗细接缝。） */
+  const FB_MIN_Z = 5;
+  const FB_WAIT_MS = 1600;
+  let fallbackTpl = 'https://tiles.openfreemap.org/planet/20261101_080013_pt/{z}/{x}/{y}.pbf';
+  const fbCache = new Map();
+  const fbPending = new Map();
+  function fetchFallback(z, x, y, signal){
+    const key = z + '/' + x + '/' + y;
+    if(fbCache.has(key)) return Promise.resolve(fbCache.get(key));
+    let p = fbPending.get(key);
+    if(!p){
+      const url = fallbackTpl.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+      p = fetch(url, { credentials: 'omit', signal })
+        .then(r => (r.ok ? r.arrayBuffer() : null))
+        .then(b => {
+          if(b && b.byteLength){
+            fbCache.set(key, b);
+            while(fbCache.size > 90) fbCache.delete(fbCache.keys().next().value);
+          }
+          return b;
+        })
+        .catch(()=> null)
+        .then(b => { fbPending.delete(key); return b; });
+      fbPending.set(key, p);
+    }
+    return p;
+  }
+
+  maplibregl.addProtocol('mango', (params, abortController) => {
+    const m = /mango:\/\/(\d+)\/(\d+)\/(\d+)/.exec(params.url);
+    if(!m) return Promise.resolve({ data: new ArrayBuffer(0) });
+    const z = +m[1], x = +m[2], y = +m[3];
+    const signal = abortController && abortController.signal;
+    return loadPack(activePackId).then(() => {
+      const hit = packTile(z, x, y);
+      if(hit) return { data: hit.buffer };
+      if(signal && signal.aborted) throw new Error('tile aborted');
+      if(z < FB_MIN_Z || z > srcMaxZoom) throw new Error('tile not in local pack');
+      return Promise.race([
+        fetchFallback(z, x, y, signal),
+        new Promise(res => setTimeout(() => res(null), FB_WAIT_MS))
+      ]).then(b => {
+        if(b && b.byteLength) return { data: b };
+        throw new Error('tile unavailable');
+      });
+    });
+  });
+
+  const map = new maplibregl.Map({
+    container: 'map',
+    style: buildStyle(blockColor),
+    center: bootCenter,
+    zoom: bootZoom,
+    minZoom: 3,
+    maxZoom: 19.5,
+    pitch: 0,
+    bearing: 0,
+    attributionControl: false,
+    preserveDrawingBuffer: true,
+    dragRotate: false,
+    touchPitch: false,
+    antialias: true,
+    fadeDuration: 120
+  });
+  mapRef = map;
+  applyPackZoom(packCache.get(activePackId));   // 包若已先于 map 到位，这里补一次
+  // 样式就绪前可能已经切过城市（此时 getSource 还拿不到 source），
+  // 这里把 source.maxzoom 补成实际的 srcMaxZoom，避免两者不一致导致放大时整屏空白
+  map.on('load', ()=>{
+    try{
+      const s = map.getSource('omt');
+      if(s && s.maxzoom !== srcMaxZoom){ s.maxzoom = srcMaxZoom; map.triggerRepaint(); }
+    }catch(e){}
+  });
+  map.touchZoomRotate.disableRotation();
+  map.keyboard.disableRotation();
+
+  /* ============ 包预取 ============
+     答题后 0.9 / 1.6 秒的停留时间里，提前把「下一题城市」的瓦片包取回来，
+     真正飞过去时直接从内存出图，不再等网络。 */
+  function prefetchCityTiles(city){
+    try{
+      if(!city || city.id == null) return;
+      loadPack(city.id);
+    }catch(e){ /* 预取失败不影响答题 */ }
+  }
+
+  const app = document.getElementById('app');
+  // 桌面端：把 393×852 的竖屏画框等比缩放进可用空间，保证任何窗口都看到完整一屏
+  function fitFrame(){
+    const PAD = 40;                                  // 画框四周留白
+    const s = Math.min(1,
+      (window.innerWidth - PAD) / 393,
+      (window.innerHeight - PAD) / 852);
+    app.style.setProperty('--frame-s', (s > 0 ? s : 0.3).toFixed(4));
+  }
+  fitFrame();
+  if(window.ResizeObserver) new ResizeObserver(fitFrame).observe(document.documentElement);
+  const splash = document.getElementById('splash');
+  const toastEl = document.getElementById('toast');
+
+  let toastTimer;
+  function toast(msg, ms){
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=> toastEl.classList.remove('show'), ms || 2400);
+  }
+
+  // 瓦片改成自托管包后首屏只需一次本地请求，等地图画完再撤启动页；
+  // 三重保险：首帧+350ms、idle（瓦片到位）、2.6s 兜底，任何一条先到都撤
+  const hideSplash = ()=>{ if(!splash.classList.contains('hide')) splash.classList.add('hide'); };
+  map.once('render', ()=> setTimeout(hideSplash, 350));
+  map.once('idle', ()=> setTimeout(hideSplash, 60));
+  setTimeout(hideSplash, 2600);
+
+  /* ============ 定位 ============ */
+  let me = null;           // 我的位置 [lng,lat]
+  let meMarker = null;
+  const locateBtn = document.getElementById('locateBtn');
+
+  // 红点（DOM 标记，不会出现在导出的墙纸里）
+  const meEl = document.createElement('div');
+  meEl.className = 'me';
+  meEl.innerHTML = '<span class="me-halo"></span><span class="me-dot"></span>';
+
+  function showMe(lngLat){
+    if(!meMarker){
+      meMarker = new maplibregl.Marker({ element: meEl, anchor: 'center' })
+        .setLngLat(lngLat)
+        .addTo(map);
+    } else {
+      meMarker.setLngLat(lngLat);
+    }
+  }
+
+  function goToMe(animate){
+    if(!me) return;
+    if(animate) map.flyTo({ center: me, zoom: Math.max(map.getZoom(), 16), speed: 1.1, curve: 1.5 });
+    else map.jumpTo({ center: me, zoom: 16 });
+  }
+
+  function askLocation(auto){
+    if(!('geolocation' in navigator)){
+      if(!auto) toast('当前浏览器不支持定位');
+      return;
+    }
+    locateBtn.classList.add('locating');
+    navigator.geolocation.getCurrentPosition(
+      pos=>{
+        locateBtn.classList.remove('locating');
+        me = [pos.coords.longitude, pos.coords.latitude];
+        showMe(me);
+        if(auto){ goToMe(true); toast('已定位到你的位置 · 红点处即是你', 2600); }
+      },
+      err=>{
+        locateBtn.classList.remove('locating');
+        if(!auto) toast(err.code === 1 ? '定位权限未开启，请允许后重试' : '定位失败，请稍后重试');
+      },
+      { enableHighAccuracy: true, timeout: 9000, maximumAge: 30000 }
+    );
+  }
+
+  // 启动时静默取一次位置（只用于显示红点，不改变随机城市的初始视角）
+  if(!(q.get('lat') && q.get('lng'))) askLocation(false);
+
+  locateBtn.addEventListener('click', ()=>{
+    if(me) { goToMe(true); toast('已回到你的位置', 1400); }
+    else askLocation(false);
+  });
+
+  document.getElementById('zoomIn').addEventListener('click', ()=> map.zoomIn({ duration: 260 }));
+  document.getElementById('zoomOut').addEventListener('click', ()=> map.zoomOut({ duration: 260 }));
+
+  /* ============ 120 色面板（12 列 × 10 行） ============ */
+  const grid = document.getElementById('grid');
+  const swatch = document.getElementById('swatch');
+  const sheet = document.getElementById('sheet');
+  const citySheet = document.getElementById('citySheet');
+  const scrim = document.getElementById('scrim');
+
+  // 按行渲染：第 1 行灰阶，其下每列一条由深到浅的色阶
+  const cells = [];
+  for(let r = 0; r < PAL_ROWS; r++){
+    for(let c = 0; c < PAL_COLS; c++){
+      const hex = PALETTE[r][c];
+      const b = document.createElement('button');
+      b.className = 'sw';
+      b.style.background = hex;
+      b.dataset.hex = hex;
+      b.setAttribute('aria-label', '颜色 ' + hex);
+      b.addEventListener('click', ()=> applyColor(hex));
+      grid.appendChild(b);
+      cells.push(b);
+    }
+  }
+  /* ---------- 地块换色（渐变；时长可指定，切城市时与飞行同步） ---------- */
+  let bgRaf = 0;
+  let pendingBlock = null;
+  const EASE_IO = t => (t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2);
+  map.once('load', ()=>{ if(pendingBlock){ paintBlock(pendingBlock, false); pendingBlock = null; } });
+  function hexToRgb(h){
+    h = (h || '').trim();
+    if(h[0] === '#') h = h.slice(1);
+    if(h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    const n = parseInt(h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function toHex(rgb){
+    return '#' + rgb.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+  }
+  // 相对亮度（0~1），用于判断文字该用黑还是白
+  function luminance(hex){
+    const [r, g, b] = hexToRgb(hex).map(v => {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126*r + 0.7152*g + 0.0722*b;
+  }
+  function paintBlock(hex, animate, duration){
+    cancelAnimationFrame(bgRaf);
+    // 样式尚未加载完成时先记下目标色，加载完再应用（初始样式本身已用该色构建）
+    if(!map.isStyleLoaded()){ pendingBlock = hex; return; }
+    if(!animate || !map.getLayer('paper')){
+      map.setPaintProperty('paper', 'background-color', hex);
+      return;
+    }
+    const from = hexToRgb(map.getPaintProperty('paper', 'background-color') || hex);
+    const to = hexToRgb(hex);
+    const dur = Math.max(60, duration || 200);
+    const t0 = performance.now();
+    // 长渐变（切城市）用与 flyTo 完全相同的缓动，短换色用 ease-out
+    const ease = dur > 400 ? EASE_IO : (p => 1 - Math.pow(1 - p, 3));
+    const step = now => {
+      const p = Math.min(1, (now - t0) / dur);
+      const e = ease(p);
+      map.setPaintProperty('paper', 'background-color',
+        toHex([from[0] + (to[0]-from[0])*e, from[1] + (to[1]-from[1])*e, from[2] + (to[2]-from[2])*e]));
+      if(p < 1) bgRaf = requestAnimationFrame(step);
+    };
+    bgRaf = requestAnimationFrame(step);
+  }
+  function applyColor(hex, animate, duration){
+    blockColor = hex;
+    paintBlock(hex, animate !== false, duration);
+    swatch.style.background = hex;
+    cells.forEach(el => el.classList.toggle('on', el.dataset.hex === hex));
+    // 文字带底色跟随地块色（弹窗里的文字块）
+    document.documentElement.style.setProperty('--block', hex);
+  }
+  applyColor(blockColor, false);
+
+  document.getElementById('shuffleBtn').addEventListener('click', ()=>{
+    applyColor(randomBlockColor());
+  });
+
+  function openSheet(){
+    closeSheet();
+    sheet.classList.add('open');
+    sheet.setAttribute('aria-hidden','false');
+    scrim.classList.add('show');
+    // 注意：这里不能用 scrollIntoView —— 面板正在做 translateY 动画，
+    // 浏览器会为了“看见”元素而滚动 overflow:hidden 的祖先，导致整个页面往上顶。
+    // 色板 64 格一屏就能看全，无需滚动；如确需滚动，只动容器自身。
+  }
+  let lastCloseAt = 0;
+  function closeSheet(){
+    [sheet, citySheet].forEach(s=>{
+      s.classList.remove('open');
+      s.setAttribute('aria-hidden','true');
+    });
+    scrim.classList.remove('show');
+    lastCloseAt = performance.now();
+    if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  }
+  function sheetIsOpen(){ return sheet.classList.contains('open') || citySheet.classList.contains('open'); }
+
+  // 关闭/完成按钮：pointerup 与 click 双保险，并阻断点击穿透（真机上偶发“点了没反应”）
+  function bindSheetBtn(el){
+    let sx = 0, sy = 0, armed = false, handledAt = 0;
+    el.addEventListener('pointerdown', e => { armed = true; sx = e.clientX; sy = e.clientY; });
+    el.addEventListener('pointerup', e => {
+      if(!armed) return;
+      armed = false;
+      if(Math.hypot(e.clientX - sx, e.clientY - sy) > 16) return;   // 认定为滑动，不算点击
+      handledAt = performance.now();
+      closeSheet();
+    });
+    el.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      if(performance.now() - handledAt < 600) return;               // pointerup 已经关过了
+      closeSheet();
+    });
+    el.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+  }
+  ['sheetDone','sheetClose','cityDone','cityClose'].forEach(id => bindSheetBtn(document.getElementById(id)));
+
+  document.getElementById('colorBtn').addEventListener('click', ()=>{
+    if(performance.now() - lastCloseAt < 300) return;   // 防“关闭后同一次点击又把面板打开”
+    openSheet();
+  });
+  scrim.addEventListener('click', closeSheet);
+  scrim.addEventListener('pointerdown', closeSheet);
+
+  /* ---------- 赞赏作者 ---------- */
+  const rewardBtn = document.getElementById('rewardBtn');
+  const rewardModal = document.getElementById('rewardModal');
+  function openReward(){
+    rewardModal.classList.add('open');
+    rewardModal.setAttribute('aria-hidden','false');
+  }
+  function closeReward(){
+    rewardModal.classList.remove('open');
+    rewardModal.setAttribute('aria-hidden','true');
+  }
+  rewardBtn.addEventListener('click', openReward);
+  rewardModal.addEventListener('click', e=>{
+    if(e.target === rewardModal) closeReward();   // 点卡片外的遮罩关闭
+  });
+  // 面板打开时，点面板外的任何地方都关闭（兜底：即使遮罩命中异常也能关）
+  document.addEventListener('pointerdown', e=>{
+    if(!sheetIsOpen()) return;
+    if(e.target.closest('.sheet')) return;
+    closeSheet();
+  }, true);
+
+  /* ============ 城市面板：每次打开随机排布 ============ */
+  const cityGrid = document.getElementById('cityGrid');
+  const cityNameEl = document.getElementById('cityName');
+  let activeCity = bootCity;
+
+  function setCityName(city){
+    if(!city){ cityNameEl.classList.remove('show'); return; }
+    cityNameEl.textContent = city.name;
+    cityNameEl.classList.add('show');
+  }
+  setCityName(bootCity);
+
+  // 切城市：飞行与地块换色渐变用同一时长 + 同一缓动，抵达时渐变正好完成
+  const FLY_MS = 1700;
+
+  function flyToCity(city, silent){
+    activeCity = city;
+    // 切到该城市的瓦片包（命中缓存则瞬间完成；未命中时先把包取回来，飞行途中数据就到位了）
+    if(city.id != null){
+      activePackId = city.id;
+      setSrcZoom(PACK_ZOOM[city.id]);   // 飞行前就把层级切对，避免途中请求旧层级瓦片
+      packRetryAt.delete(city.id);      // 主动切城：清掉上次失败留下的冷却，立即重试
+      loadPack(city.id).then(()=>{
+        if(city.id === activePackId) applyPackZoom(packCache.get(city.id));
+        map.triggerRepaint();
+      });
+    }
+    if(!silent) setCityName(city);
+    closeSheet();
+    map.flyTo({
+      center: city.c, zoom: cityZoom(city),
+      duration: FLY_MS, easing: EASE_IO
+    });
+    // 换城市的同时换一个地块色（避免和当前色相同），渐变时长 = 飞行时长
+    let c = randomBlockColor();
+    for(let i = 0; i < 8 && c === blockColor; i++) c = randomBlockColor();
+    applyColor(c, true, FLY_MS);
+  }
+
+  // 城市面板列表顺序：默认每次打开洗牌；点「排序」后按拼音升序（两组各自排序，组顺序不变）
+  let citySortMode = false;
+  const byPinyin = (a, b)=>{
+    const pa = CITY_PINYIN[a.name] || a.name;
+    const pb = CITY_PINYIN[b.name] || b.name;
+    return pa < pb ? -1 : (pa > pb ? 1 : 0);
+  };
+
+  function renderCityList(){
+    // 两组：国内 = 猜城市页「困难」档 120 城；国际 = 猜城市页「国际」档 40 城
+    const groups = [
+      { label:'国内', list: HARD_CITIES },
+      { label:'国际', list: WORLD_CITIES }
+    ];
+    cityGrid.innerHTML = '';
+    groups.forEach(g=>{
+      const h = document.createElement('div');
+      h.className = 'city-group';
+      h.textContent = g.label;
+      cityGrid.appendChild(h);
+      const list = g.list.slice();
+      if(citySortMode){
+        list.sort(byPinyin);                       // 按拼音 A→Z
+      } else {
+        // 组内洗牌：每次打开顺序都不同
+        for(let i = list.length - 1; i > 0; i--){
+          const j = Math.floor(Math.random() * (i + 1));
+          const t = list[i]; list[i] = list[j]; list[j] = t;
+        }
+      }
+      list.forEach(city=>{
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'city-item' + (city === activeCity ? ' on' : '');
+        b.textContent = city.name;
+        b.addEventListener('click', ()=>{
+          markRandSeen(city);                    // 手动选过的城市也算出现过
+          flyToCity(city);
+        });
+        cityGrid.appendChild(b);
+      });
+    });
+  }
+
+  function openCitySheet(){
+    renderCityList();
+    closeSheet();
+    citySheet.classList.add('open');
+    citySheet.setAttribute('aria-hidden','false');
+    scrim.classList.add('show');
+    cityGrid.scrollTop = 0;   // 只滚动网格自身，绝不触发整页位移
+  }
+  document.getElementById('cityBtn').addEventListener('click', ()=>{
+    if(performance.now() - lastCloseAt < 300) return;   // 防“关闭后同一次点击又把面板打开”
+    openCitySheet();
+  });
+
+  // 两点间球面距离（km）
+  function distanceKm(a, b){
+    const R = 6371, rad = v => v * Math.PI / 180;
+    const dLat = rad(b[1] - a[1]), dLng = rad(b[0] - a[0]);
+    const h = Math.sin(dLat/2) ** 2 +
+              Math.cos(rad(a[1])) * Math.cos(rad(b[1])) * Math.sin(dLng/2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
+  // 随机切到另一座城市（左上角「随机国内 / 随机国际」）
+  // 国内随机库 = 猜城市页「困难」档的 120 城，按距离加权：越近的城市被抽中的概率越高
+  // 国际随机库 = 「国际」档的 40 城，等概率（全球散开才谈得上随机）
+  // 两个库各自维护一条队列：order 的前 fresh 个是「还没出现过」的，抽中/看过的移到队尾。
+  // 一轮里把整库城市都走一遍才会重新开一轮，避免反复抽到同几座城。
+  const randDecks = new Map();
+  function randDeck(pool){
+    let d = randDecks.get(pool);
+    if(!d){ d = { order: pool.slice(), fresh: pool.length }; randDecks.set(pool, d); }
+    return d;
+  }
+  [HARD_CITIES, WORLD_CITIES].forEach(randDeck);   // 两个库从一开始就建好，手动选城也能记进去
+  function markRandSeen(city){
+    randDecks.forEach(d=>{
+      const i = d.order.indexOf(city);
+      if(i >= 0 && i < d.fresh){       // 只搬「未出现过」区里的，队尾的不用再搬
+        d.order.splice(i, 1);
+        d.order.push(city);
+        d.fresh--;
+      }
+    });
+  }
+  markRandSeen(bootCity);                          // 首屏城市也算出现过
+
+  function pickCity(pool, uniform){
+    const d = randDeck(pool);
+    if(d.fresh <= 0) d.fresh = d.order.length;   // 整库走完一轮，重新排一轮
+    let list = d.order.slice(0, d.fresh).filter(x=> x !== activeCity);
+    if(!list.length){                            // 没出现过的只剩当前城市时也开新一轮
+      d.fresh = d.order.length;
+      list = d.order.filter(x=> x !== activeCity);
+    }
+    if(!list.length) return null;
+    let picked;
+    if(uniform){
+      picked = list[Math.floor(Math.random() * list.length)];
+    } else {
+      const base = (activeCity && activeCity.c) || map.getCenter().toArray();
+      const weights = list.map(x=> Math.exp(-distanceKm(base, x.c) / 700) + 0.012);
+      const total = weights.reduce((a, b)=> a + b, 0);
+      let r = Math.random() * total;
+      picked = list[list.length - 1];
+      for(let i = 0; i < list.length; i++){
+        r -= weights[i];
+        if(r <= 0){ picked = list[i]; break; }
+      }
+    }
+    markRandSeen(picked);                        // 出现过的城市排到库尾
+    return picked;
+  }
+  function randomCity(silent){
+    const picked = pickCity(HARD_CITIES, false);
+    if(picked) flyToCity(picked, silent);
+    return picked;
+  }
+  function randomWorldCity(silent){
+    const picked = pickCity(WORLD_CITIES, true);
+    if(picked) flyToCity(picked, silent);
+    return picked;
+  }
+  // 城市面板右上「排序」：按拼音重排当前列表（两组各自排序）
+  document.getElementById('cityShuffle').addEventListener('click', ()=>{
+    citySortMode = true;
+    renderCityList();
+    cityGrid.scrollTop = 0;
+  });
+  document.getElementById('randCityBtn').addEventListener('click', ()=>{
+    if(guessMode){ startQuizRound(); return; }   // 猜城市模式：随机 = 换下一题，不报城市名
+    const city = randomCity();
+    if(city) toast(city.name, 1400);
+  });
+  // 随机国际：只从「国际」档 40 城抽，猜城市模式下这枚按钮会收起
+  document.getElementById('randWorldBtn').addEventListener('click', ()=>{
+    if(guessMode) return;
+    const city = randomWorldCity();
+    if(city) toast(city.name, 1400);
+  });
+
+  /* ============ 猜城市小游戏 ============ */
+  const guessBtn = document.getElementById('guessBtn');
+  const quizEl = document.getElementById('quiz');
+  const bottombarEl = document.querySelector('.bottombar');
+  const randBtnEl = document.getElementById('randCityBtn');
+  const randWorldBtn = document.getElementById('randWorldBtn');
+  const randBtnHTML = randBtnEl.innerHTML;          // 退出游戏时还原「随机国内」按钮
+  const quizFinalEl = document.getElementById('quizFinal');
+  // App 链接二维码（结算画面中上部展示，41×41 模块 PNG 内嵌，无外部依赖）
+  const QR_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQIAAAECCAIAAACaLU4HAAAFTElEQVR4nO3dO47bSBQFUPXAi3A2Cfe/IibOvAsORimTQun9JJ0Td5NsWRcGL6pe/VzX9YDv9k/3A0A/MQAxADEAMQAxgCevyCAGIAYgBiAG8OQVGcQAxADEAMQAnrwiw+PX3mdw/Pu78cM7//wNecK966z8Vt5nOO2Zz9uV53837vxvAGIAYgBiAGIArzRFd1FdRF6jcr/OSu9R2YTkPfNdZZ9zDvtu3GmKQAxADEAMQAwgtimqXDOzd6/K7iivG1kR1SZ9xndjhaYIxADEAMQAxACym6JeUWuB9lqgqOYq6rfmdzW9NEUgBiAGIAYgBvDZTVHURJ2oFUQr65dW7r73hHtXvpu2eiqKpgjEAMQAxADEALKbonfsEPJ6ocqZ0nk7+D71u6EpAjEAMQAxADGA2Kao98SrqM4n6mdWVD7P3jOfrTvdKmmKQAxADEAMQAzglaZo2pqQu2m9UFSjUtm6HF8zy0hTBGIAYgBiAGIATz/XdT36pgDt6Z2xEzUFqPJ59pxB3Vre80TRFIEYgBiAGIAYQGxTNH8uUN786sozy6JOXou68tnaiUV1R5oiEAMQAxADEAN4pSmaf9bYnrz9aO94Htnxhg3Y3t+uKQIxADEAMQAxgFfmFOX1Qis/k9cYTFvjNG0q0dk63ztvp5umCMQAxADEAMQAss8+q5y6U7lrbE/lSpveaUJH2r9gHk0RiAGIAYgBiAHU7z7L+6273p5q5cqV8456ZxAd5hTBfApTEAMQAxADCF1TVNmW5Ilam5S3923vOpV3X7HXbuV98l6RQQxADEAMQAwgdk7R3pt+ZYMx7VT6yrPYKk9MO4ad6bZCUwRiAGIAYgBiALG7z+bvLFu517R5R5VPuKLyPLvKM+80RSAGIAYgBiAG8EpTNG3VSm+DsXflKL3ntZ2FV87rjjRFIAYgBiAGIAaQ3RT19kJ5O8sqW6moJ5zWC93lrXpaoSkCMQAxADEAMYDs3Wfzd5bt/VblX/GpDc/Z+sx3miIQAxADEAMQA4htiubPMe6d8BOl9wlPc4rgUylMQQxADEAMIHT3WZ689TnvuA6qd57PMX529x6vyCAGIAYgBiAG8PTrEaRyTlHUdSqnVec9z7RJ1NNWha3QFIEYgBiAGIAYwCtNUdRajpXr5M2m3mtCotqJad1a72qu3pVjmiIQAxADEAMQA8g+++x79n/tPU/eeW2V3dExbIqUNUWwSWEKYgBiAGIAyXOK5u8jW7nXirzu6Hv22fXyigxiAGIAYgBiABPWFFV2PtNOt9+7e+9qrnPYjKaVe63QFIEYgBiAGIAYwLvsPnvHHqZyR9ievDVOUSq7Pk0RiAGIAYgBiAHEnn22Im+mzd4k6j1R54jtqTzXrFLvGjBNEYgBiAGIAYgBvLKmaJreCT+fMYNoRd6aq955R5oiEAMQAxADEAN4ZU3RtH1JeY1K1M/cRfVL03a6HVt9jrPPoJnCFMQAxADEAEJ3n/XOgp52Cvzebri8z7ByZ9lZuFrJmiIIoykCMQAxADGA5DlFlWdX7V1n716VLVDeuqOVex0f0dGt8IoMYgBiAGIAYgD1E63fUd658Ht3X1E5y+hI+zQq54RrikAMQAxADEAM4ElTVDSxOWqtVN5JZ8dWe9O7ViqKpgjEAMQAxADEALKbot7ZOL1zb3pPnK/sqVZYUwRvQGEKYgBiAGIAoU1R72lovWfHrzxP5SlvUc9ztq78saYISmmKQAxADEAM4H8/13X5JPhyXpFBDEAMQAxADODJKzKIAYgBiAGIATx5RQYxADEAMQAxgCevyCAGPHj8B5Tv/66ylJ9EAAAAAElFTkSuQmCC';
+  const qrImgEl = document.getElementById('qrImg');
+  const qrBoxEl = document.getElementById('qfQr');
+  qrImgEl.src = QR_DATA_URI;
+  const qfLineEl = document.getElementById('qfLine');
+  const shareBtnEl = document.getElementById('quizShare');
+  const QUIZ_PER_ROUND = 10;                        // 10 题为一个轮回
+  let guessMode = false;
+  let quizCity = null;
+  let quizTimer = null;
+  let quizIndex = 0;                                // 当前第几题（1 起）
+  let quizScore = 0;                                // 猜对题数
+  let usedCities = new Set();                       // 本轮已出过的城市（10 题内不重复）
+  let pendingNext = null;                           // 已抽好、还没飞过去的下一题城市（用于预取瓦片）
+
+  /* ---------- 限时挑战：60 秒内连续答题，答对 a / 已答 b ---------- */
+  const timeBtn = document.getElementById('timeBtn');
+  const brandBtn = document.getElementById('brandBtn');
+  const timerPill = document.getElementById('timerPill');
+  const CHALLENGE_SECONDS = 60;
+  let timedMode = false;
+  let challengeTimer = null;                        // 倒计时用，独立于 quizTimer
+  let timeLeft = 0;
+  let challengeRight = 0;                           // a：答对题数
+  let challengeTotal = 0;                           // b：已答题数
+  let challengeAnswers = new Set();                  // 本局已经当过一次「正确答案」的城市（整局不重复）
+  function updateChallengeCounter(){
+    randBtnEl.innerHTML = '<span>' + challengeRight + '/' + challengeTotal + '</span>';
+  }
+  function challengeTick(){
+    clearTimeout(challengeTimer);
+    challengeTimer = setTimeout(()=>{
+      timeLeft--;
+      if(timeLeft <= 0){ endTimed(); return; }
+      timerPill.textContent = timeLeft + 's';
+      timerPill.classList.toggle('low', timeLeft <= 10);   // 最后 10 秒变红
+      challengeTick();
+    }, 1000);
+  }
+  function startTimed(){
+    timedMode = true;
+    app.classList.add('timed-mode');                // 限时挑战：收起「随机国际」+ 底部颜色/城市/生成墙纸
+    randWorldBtn.classList.add('hide');
+    bottombarEl.style.display = 'none';
+    clearTimeout(quizTimer);                        // 若普通版结算倒计时还在跑，先停掉
+    clearInterval(quizTimer);
+    challengeRight = 0; challengeTotal = 0;
+    timeLeft = CHALLENGE_SECONDS;
+    quizIndex = 0; quizScore = 0;
+    usedCities.clear();
+    pendingNext = null;
+    challengeAnswers.clear();                       // 新一局：整局不重复的答案池重新开始
+    quizFinalEl.classList.remove('show');
+    quizEl.classList.remove('show');
+    quizEl.innerHTML = '';
+    timerPill.textContent = CHALLENGE_SECONDS + 's';
+    timerPill.classList.remove('low');
+    timerPill.classList.add('show');
+    timeBtn.classList.add('on');
+    updateChallengeCounter();                       // 先显示 0/0，startQuizRound 里同样保持
+    challengeTick();
+    startQuizRound();
+  }
+  // 倒计时结束 → 结算画面（成绩行 + 分享 + 二维码），10 秒倒计时后自动开下一局
+  function endTimed(){
+    clearTimeout(challengeTimer);
+    clearTimeout(quizTimer);
+    timerPill.classList.remove('show');
+    // 与普通版结算一致：保留最后一题的四个选项，只去掉对错染色与「猜对啦/猜错啦」提示
+    quizEl.querySelectorAll('.quiz-item').forEach(x=> x.classList.remove('reveal', 'wrong', 'dim'));
+    const remainRes = quizEl.querySelector('.quiz-result');
+    if(remainRes) remainRes.classList.remove('show', 'ok', 'no');
+    quizEl.classList.add('show');
+    qfLineEl.innerHTML = '你一共猜对了<span class="qf-num">' + challengeRight +
+      '</span>/' + challengeTotal + '个城市！';
+    quizFinalEl.classList.add('show');
+    placeShare();
+    shareBtnEl.classList.remove('done');
+    const nextRound = ()=> startTimed();            // 下一局：60 秒重新开始，计数归零
+    let left = 10;
+    shareBtnEl.textContent = '点此截图分享 · ' + left;
+    shareBtnEl.onclick = async ()=>{
+      if(shareBtnEl.classList.contains('done')) return;
+      clearInterval(quizTimer);
+      // 等地图完全停止（飞行结束、瓦片加载完）再截图
+      await new Promise(res=>{
+        if(map.isMoving() || !map.isStyleLoaded()) map.once('idle', res);
+        else res();
+      });
+      captureShare();
+      shareBtnEl.classList.add('done');
+      shareBtnEl.textContent = '已生成 ✓';
+      quizTimer = setTimeout(nextRound, 1400);
+    };
+    quizTimer = setInterval(()=>{
+      left--;
+      if(left <= 0){ clearInterval(quizTimer); nextRound(); return; }
+      shareBtnEl.textContent = '点此截图分享 · ' + left;
+    }, 1000);
+  }
+  // 点「芒果猜城市」退出限时 → 回到普通版（10 题一轮）
+  function exitTimed(){
+    timedMode = false;
+    app.classList.remove('timed-mode');
+    // 回到普通版仍保持答题态；万一限时是从墙纸页直接起步，这里把墙纸页控件还回去
+    if(!guessMode){
+      randWorldBtn.classList.remove('hide');
+      bottombarEl.style.display = '';
+    }
+    clearTimeout(challengeTimer);
+    clearTimeout(quizTimer);
+    quizFinalEl.classList.remove('show');
+    quizEl.classList.remove('show');
+    quizEl.innerHTML = '';
+    timerPill.classList.remove('show');
+    timeBtn.classList.remove('on');
+    quizIndex = 0; quizScore = 0;
+    usedCities.clear();
+    pendingNext = null;
+    startQuizRound();
+  }
+  // 墙纸页也能直接点「限时挑战」：先套用答题态 UI（不多出一题），再开局
+  timeBtn.addEventListener('click', ()=>{
+    if(!guessMode) enterGuess(true);
+    startTimed();                                  // 进行中再点 = 重新开始
+  });
+  // 右上「芒果猜城市」= 猜城市页入口：限时中点它退回普通版；墙纸页点它进猜城市；
+  // 已在猜城市页则保持当前局不动（幂等，不会误点重开一局）
+  brandBtn.addEventListener('click', ()=>{
+    if(timedMode){ exitTimed(); return; }
+    if(!guessMode) enterGuess();
+  });
+
+  /* ---------- 题库：左上胶囊直接显示当前档（默认「简单」），点开展开四档 ---------- */
+  const tierBarEl = document.getElementById('tierBar');
+  const tierToggleEl = document.getElementById('tierToggle');
+  const currentPool = ()=> activeTier.pool;
+  function syncTierUI(){
+    tierToggleEl.textContent = activeTier.label;      // 胶囊文字 = 当前选中的难度
+    tierBarEl.querySelectorAll('.tier-pill').forEach(b=>{
+      b.classList.toggle('on', b.dataset.key === activeTier.key);
+    });
+  }
+  function setTierOpen(open){
+    tierBarEl.classList.toggle('show', !!open);
+    tierToggleEl.classList.toggle('open', !!open);
+    tierToggleEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  tierToggleEl.addEventListener('click', ()=> setTierOpen(!tierBarEl.classList.contains('show')));
+  TIERS.forEach(t=>{
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tier-pill';
+    b.dataset.key = t.key;
+    b.textContent = t.label;
+    b.addEventListener('click', ()=>{
+      if(!guessMode) return;
+      if(t.key === activeTier.key){ setTierOpen(false); return; }   // 点当前档 = 收起
+      activeTier = t;
+      syncTierUI();
+      quizIndex = 0; quizScore = 0;      // 换档：进度归零，立刻出下一题
+      if(timedMode) usedCities.clear();  // 限时换档：题库换了，已出城市清空（累计成绩保留）
+      pendingNext = null;
+      quizFinalEl.classList.remove('show');
+      setTierOpen(false);                // 选完自动收起，左上胶囊随即显示新档名
+      startQuizRound();
+    });
+    tierBarEl.appendChild(b);
+  });
+  syncTierUI();
+
+  function enterGuess(skipRound){
+    guessMode = true;
+    // 右上两个入口文案固定：「芒果猜城市」进猜城市、「生成墙纸」回墙纸页，不再随模式互切
+    bottombarEl.style.display = 'none';      // 隐藏底部三个按钮
+    setCityName(null);                       // 不显示顶部城市名
+    // 左上角「随机国内」→ 题号计数器，下方是「难度」胶囊（点开才是四档）
+    randBtnEl.innerHTML = '<span>1/10</span>';
+    randBtnEl.disabled = true;
+    randWorldBtn.classList.add('hide');      // 答题时先收起「随机国际」，避免和难度胶囊抢位置
+    tierToggleEl.classList.add('show');
+    timeBtn.classList.add('show');
+    setTierOpen(false);
+    quizIndex = 0;
+    quizScore = 0;
+    syncTierUI();
+    if(!skipRound) startQuizRound();               // 直接进限时挑战时由 startTimed 统一出第一题
+  }
+  function exitGuess(){
+    guessMode = false;
+    clearTimeout(quizTimer);
+    clearInterval(quizTimer);
+    timedMode = false;                       // 退出猜城市 = 限时挑战一并结束
+    app.classList.remove('timed-mode');
+    clearTimeout(challengeTimer);
+    timerPill.classList.remove('show');
+    timeBtn.classList.remove('show', 'on');
+    pendingNext = null;
+    quizFinalEl.classList.remove('show');
+    quizEl.classList.remove('show');
+    quizEl.innerHTML = '';
+    bottombarEl.style.display = '';
+    randBtnEl.innerHTML = randBtnHTML;
+    randBtnEl.disabled = false;
+    randWorldBtn.classList.remove('hide');
+    tierToggleEl.classList.remove('show');
+    setTierOpen(false);
+    setCityName(activeCity);
+  }
+  // 右上第三行「生成墙纸」= 墙纸页入口：答题 / 限时态点它回到生成墙纸页面；
+  // 已在墙纸页则保持不动（纯导航，不重复切换、不刷新地图）
+  guessBtn.addEventListener('click', ()=>{ if(guessMode) exitGuess(); });
+
+  function shuffleArr(a){
+    for(let i = a.length - 1; i > 0; i--){
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+
+  // 出题队列：每个难度档一条，order 的前 fresh 个是「还没猜过」的城市。
+  // 出过题的城市移到队尾，一轮把整库走完才重新排一轮；跨轮、跨局、换档都保留进度。
+  // 按城市名匹配：四档题库是包含关系，同名城市在不同数组里是不同对象。
+  const quizDecks = new Map();
+  TIERS.forEach(t => quizDecks.set(t.pool, { order: t.pool.slice(), fresh: t.pool.length }));
+  function markQuizSeen(city){
+    if(!city) return;
+    quizDecks.forEach(d => {
+      const i = d.order.findIndex(x => x.name === city.name);
+      if(i >= 0 && i < d.fresh){
+        const [moved] = d.order.splice(i, 1);
+        d.order.push(moved);
+        d.fresh--;
+      }
+    });
+  }
+
+  // 出下一题：从当前档「还没猜过」的队列前缀里抽，飞过去但不报名字
+  function startQuizRound(){
+    clearTimeout(quizTimer);
+    clearInterval(quizTimer);
+    quizFinalEl.classList.remove('show');
+    quizIndex++;
+    if(quizIndex === 1){ usedCities.clear(); pendingNext = null; }   // 新一轮开始：清空已出城市
+    randBtnEl.innerHTML = timedMode
+      ? '<span>' + challengeRight + '/' + challengeTotal + '</span>'
+      : '<span>' + quizIndex + '/' + QUIZ_PER_ROUND + '</span>';
+    // 答题后的停留时间里已经抽好并预取过瓦片 → 直接用，避免飞过去再等瓦片
+    const pre = pendingNext;
+    pendingNext = null;
+    if(pre && pre !== quizCity){
+      quizCity = pre;
+      flyToCity(pre, true);
+    } else {
+      quizCity = randomCitySilent();
+    }
+    markQuizSeen(quizCity);                       // 猜过的城市排到库尾（其它档的同名城也一起排）
+    usedCities.add(quizCity.name);
+    if(timedMode) challengeAnswers.add(quizCity.name);   // 整局不再当答案
+    renderQuiz();
+  }
+
+  // 分享按钮位置优先保证不盖住底部 4 个选项；成绩行在其上方自动上移让位
+  // （按钮 top 有过渡动画，位置一律按数值计算，不读动画中的 getBoundingClientRect）
+  function placeShare(){
+    shareBtnEl.style.top = '30px';
+    qfLineEl.style.top = '0px';
+    // 画框在桌面端有等比缩放，统一换算回 393×852 的内部坐标再算
+    const rect = app.getBoundingClientRect();
+    const s = (app.clientWidth ? rect.width / app.clientWidth : 1) || 1;
+    const appH = app.clientHeight;
+    const optsTop = (quizEl.getBoundingClientRect().top - rect.top) / s;
+    const limit = optsTop - shareBtnEl.offsetHeight - 10 - appH / 2;
+    if(limit < 30) shareBtnEl.style.top = Math.max(-26, limit) + 'px';
+    // 成绩行上移：底边距分享按钮顶边至少 10px，绝不被按钮挡住
+    const shareTop = appH / 2 + parseFloat(shareBtnEl.style.top);
+    const lineH = qfLineEl.getBoundingClientRect().height / s;
+    const centerOffset = (shareTop - 10 - lineH / 2) - appH / 2;
+    if(centerOffset < 0) qfLineEl.style.top = centerOffset + 'px';
+    // 二维码卡片跟随成绩行上移，始终悬在其上方 26px，绝不压住文字
+    const qrH = qrBoxEl.offsetHeight;
+    qrBoxEl.style.bottom = 'auto';
+    qrBoxEl.style.top = (parseFloat(qfLineEl.style.top) - 26 - qrH) + 'px';
+  }
+  // 只挑城、不飞行（给「预取下一题瓦片」用）
+  // 答案只从「还没猜过」的队列前缀里抽：中国题库按距离加权，国际题库等概率。
+  // 不再用 usedCities 约束答案 —— 那里面混着干扰项，会把答案池挤空，
+  // 导致跨轮又抽回刚猜过的城市。选项自身的本轮不重复仍由 usedCities 负责。
+  function chooseCitySilent(){
+    const d = quizDecks.get(currentPool());
+    if(d.fresh <= 0) d.fresh = d.order.length;      // 整库猜完一轮，重新排一轮
+    let cand = d.order.slice(0, d.fresh).filter(x => x !== quizCity);
+    if(!cand.length) cand = d.order.filter(x => x !== quizCity);   // 极端：库里只剩当前城市
+    if(!cand.length) return quizCity;
+    let picked;
+    if(activeTier.key === 'world'){
+      picked = cand[Math.floor(Math.random() * cand.length)];
+    } else {
+      const base = (activeCity && activeCity.c) || map.getCenter().toArray();
+      const weights = cand.map(x=> Math.exp(-distanceKm(base, x.c) / 700) + 0.012);
+      const total = weights.reduce((a, b)=> a + b, 0);
+      let r = Math.random() * total;
+      picked = cand[cand.length - 1];
+      for(let i = 0; i < cand.length; i++){
+        r -= weights[i];
+        if(r <= 0){ picked = cand[i]; break; }
+      }
+    }
+    return picked;
+  }
+  function randomCitySilent(){
+    const picked = chooseCitySilent();
+    if(picked) flyToCity(picked, true);
+    return picked;
+  }
+
+  // 轮回结算：把地图画面 + 结算 UI（成绩行/分享按钮/四个选项）
+  // 合成一张高清成绩截图并下载（iOS 长按图片可存相册）
+  // 布局按截图画布重新排布，字体比页面放大一倍以上，保证分享出来清晰可读
+  function rr(ctx, x, y, w, h, r){
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);
+    ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+  }
+  function buildShareCanvas(){
+    const src = map.getCanvas();
+    if(!src || !src.width) return null;
+    // 按画框内部尺寸（iPhone 15：393×852）出图，桌面缩放不影响导出
+    const cssW = app.clientWidth || 393, cssH = app.clientHeight || 852;
+    const W = Math.max(1179, src.width);
+    const H = Math.round(W * cssH / cssW);
+    const k = W / cssW;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(src, 0, 0, W, H);              // 地图铺满底图
+    const FONT = '-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
+    // 顶栏玻璃胶囊（与页面顶栏同款：白底、深字、全圆角）
+    function pill(text, x, y, w, h, fs, fw, active){
+      ctx.save();
+      if(!active){
+        ctx.shadowColor = 'rgba(70,52,22,.18)';
+        ctx.shadowBlur = 8*k;
+        ctx.shadowOffsetY = 2*k;
+      }
+      ctx.fillStyle = active ? '#4A4643' : 'rgba(255,255,255,.88)';
+      rr(ctx, x, y, w, h, h/2);
+      ctx.fill();
+      ctx.restore();
+      ctx.save();
+      ctx.fillStyle = active ? '#FFFFFF' : '#231E17';
+      ctx.font = fw + ' ' + fs + 'px ' + FONT;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, x + w/2, y + h/2 + 1*k);
+      ctx.restore();
+    }
+    const pw = 96*k, ph = 36*k, pf = 12.5*k, gap = 8*k, m = 14*k;
+    // —— 左上：题号 + 当前难度（未展开时与页面一致）——
+    pill(randBtnEl.textContent.trim(), m, m, pw, ph, pf, 620);
+    pill(activeTier.label, m, m + ph + gap, pw, ph, pf, 620);
+    // —— 右上：品牌 +（限时挑战）+ 生成墙纸 + 赞赏作者 ——
+    let ry = m;
+    pill('芒果猜城市', W - m - pw, ry, pw, ph, pf, 640); ry += ph + gap;
+    if(timedMode){ pill('限时挑战', W - m - pw, ry, pw, ph, pf, 620); ry += ph + gap; }
+    pill(guessBtn.textContent, W - m - pw, ry, pw, ph, pf, 620); ry += ph + gap;
+    pill('赞赏作者', W - m - pw, ry, pw, ph, pf, 620);
+    const optEls = [...quizEl.querySelectorAll('.quiz-item')];
+    // —— 底部四个选项：完全照答题页几何（宽 min(148,38vw)、高 50、间距 10、距底 26），
+    //    这样结算图和"答题时的正常页面"长得一样 ——
+    const optW = Math.min(148, cssW * 0.38) * k;
+    const optH = 50*k, optGap = 10*k, optR = 16*k, optFs = 15*k;
+    let oy = H - 26*k - (optEls.length*optH + (optEls.length - 1)*optGap);
+    optEls.forEach(el=>{
+      const cs = getComputedStyle(el);
+      ctx.save();
+      ctx.globalAlpha = parseFloat(cs.opacity) || 1;
+      ctx.fillStyle = cs.backgroundColor;
+      rr(ctx, (W-optW)/2, oy, optW, optH, optR); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,.65)';
+      ctx.lineWidth = 1*k;
+      rr(ctx, (W-optW)/2, oy, optW, optH, optR); ctx.stroke();
+      ctx.fillStyle = cs.color;
+      ctx.font = '620 ' + optFs + 'px ' + FONT;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(el.textContent, W/2, oy + optH/2 + 1*k);
+      ctx.restore();
+      oy += optH + optGap;
+    });
+    // —— 正中一句话：白底黑字、答对数红色（与页面成绩行同款规则）——
+    //    普通版「你一共猜对了 x/10 个城市！」；限时版「你一共猜对了 a/b 个城市！」
+    const t1 = '你一共猜对了';
+    const num = timedMode ? String(challengeRight) : String(quizScore);
+    const t2 = '/' + (timedMode ? challengeTotal : QUIZ_PER_ROUND) + '个城市！';
+    let fs = 15*k;
+    const PADX = 7.5*k, PADY = 6*k;
+    ctx.font = '700 ' + fs + 'px ' + FONT;
+    let tw = ctx.measureText(t1 + num + t2).width;
+    if(tw + PADX*2 > W - 40*k){                     // 极端长句才缩字
+      fs *= (W - 40*k - PADX*2) / tw;
+      ctx.font = '700 ' + fs + 'px ' + FONT;
+      tw = ctx.measureText(t1 + num + t2).width;
+    }
+    const w1 = ctx.measureText(t1).width, wn = ctx.measureText(num).width;
+    const bh = fs*1.15 + PADY*2, bw = tw + PADX*2, bx = (W-bw)/2, by = H/2 - bh/2;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.18)';
+    ctx.shadowBlur = 20*k;
+    ctx.shadowOffsetY = 6*k;
+    ctx.fillStyle = '#fff';
+    rr(ctx, bx, by, bw, bh, 10*k);
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    let x = W/2 - tw/2;
+    ctx.fillStyle = '#000';
+    ctx.fillText(t1, x, H/2); x += w1;
+    ctx.fillStyle = '#FF3B30';
+    ctx.fillText(num, x, H/2); x += wn;
+    ctx.fillStyle = '#000';
+    ctx.fillText(t2, x, H/2);
+    ctx.restore();
+    // —— 中上部二维码卡片：白底圆角 + App 链接二维码 + 「扫码一起玩」 ——
+    if(qrImgEl.complete && qrImgEl.naturalWidth){
+      const qs = 104*k, pad = 10*k, lblH = 17*k, lblGap = 4*k;
+      const qw = qs + pad*2, qh = qs + pad*2 + lblGap + lblH;
+      const qx = (W - qw)/2, qy = by - 24*k - qh;   // 底边距成绩行上缘 24*k
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,.18)';
+      ctx.shadowBlur = 20*k;
+      ctx.shadowOffsetY = 6*k;
+      ctx.fillStyle = '#fff';
+      rr(ctx, qx, qy, qw, qh, 14*k);
+      ctx.fill();
+      ctx.restore();
+      ctx.drawImage(qrImgEl, qx + pad, qy + pad, qs, qs);
+      ctx.save();
+      ctx.fillStyle = '#231E17';
+      ctx.font = '640 ' + 11*k + 'px ' + FONT;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('扫码一起玩', W/2, qy + qh - lblH/2 - 3*k);
+      ctx.restore();
+    }
+    return c;
+  }
+
+  function captureShare(){
+    const c = buildShareCanvas();
+    if(!c) return;
+    c.toBlob(blob=>{
+      if(!blob) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = '芒果猜城市-成绩.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+      toast('已生成成绩截图 · 可长按图片保存到相册', 3200);
+    }, 'image/png');
+  }
+
+  function renderQuiz(){    // 4 个选项：1 个正确答案 + 3 个随机干扰项（均取自当前题库），洗牌后竖排
+    const pool = currentPool();
+    // 干扰项也排除本轮已出过的城市 —— 一轮 10 题里任何城市只出现一次
+    const cand = pool.filter(x=> x === quizCity || !usedCities.has(x.name));
+    const opts = [quizCity];
+    let guard = 0;
+    while(opts.length < 4 && opts.length < cand.length && guard++ < 500){
+      const c = cand[Math.floor(Math.random() * cand.length)];
+      if(!opts.includes(c)) opts.push(c);
+    }
+    // 名字快用完（限时挑战连答很多题）时补足到 4 个选项：
+    // 限时模式先从更大的同语种题库取名字（国内 120 / 国际 40），尽量整局不重复
+    if(opts.length < 4){
+      let spare = pool.filter(x=> x !== quizCity && !opts.includes(x));
+      if(timedMode){
+        const wide = activeTier.key === 'world' ? WORLD_CITIES : HARD_CITIES;
+        const extra = wide.filter(x=> x !== quizCity && !usedCities.has(x.name) && !opts.includes(x));
+        if(extra.length) spare = extra;
+      }
+      while(opts.length < 4 && spare.length){
+        opts.push(spare.splice(Math.floor(Math.random() * spare.length), 1)[0]);
+      }
+    }
+    shuffleArr(opts);
+    opts.forEach(c=> usedCities.add(c.name));   // 干扰项也计入"已出"，整轮不重复
+    quizEl.innerHTML = '';
+    const result = document.createElement('div');
+    result.className = 'quiz-result';
+    quizEl.appendChild(result);
+    let answered = false;
+    opts.forEach(city=>{
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'quiz-item';
+      b.textContent = city.name;
+      b.addEventListener('click', ()=>{
+        if(answered) return;
+        if(timedMode && timeLeft <= 0) return;   // 限时已结束：结算画面里的选项只是画面，不再计分
+        answered = true;
+        const ok = city === quizCity;
+        const isFinal = !timedMode && quizIndex >= QUIZ_PER_ROUND;   // 第 10 题答完 → 轮回结算（限时模式无轮回）
+        const nextRound = ()=>{ quizIndex = 0; quizScore = 0; startQuizRound(); };
+        if(ok) quizScore++;
+        if(timedMode){                                    // 限时：左上角 a/b 实时累计
+          challengeTotal++;
+          if(ok) challengeRight++;
+          updateChallengeCounter();
+        }
+        if(isFinal){
+          // 轮回结算：成绩行显示在页面正中（黑字，答对数红色，白色底块贴字），
+          // 下一行是「点此截图分享 · N」，10 秒倒计时结束自动开新一轮
+          qfLineEl.innerHTML = '你一共猜对了<span class="qf-num">' + quizScore + '</span>/' + QUIZ_PER_ROUND + '个城市！';
+          quizFinalEl.classList.add('show');
+          placeShare();
+          shareBtnEl.classList.remove('done');
+          let left = 10;
+          shareBtnEl.textContent = '点此截图分享 · ' + left;
+          shareBtnEl.onclick = async ()=>{
+            if(shareBtnEl.classList.contains('done')) return;
+            clearInterval(quizTimer);
+            // 等地图完全停止（飞行结束、瓦片加载完）再截图
+            await new Promise(res=>{
+              if(map.isMoving() || !map.isStyleLoaded()) map.once('idle', res);
+              else res();
+            });
+            captureShare();                       // 先截图（此时按钮/成绩行都还是原样）
+            shareBtnEl.classList.add('done');
+            shareBtnEl.textContent = '已生成 ✓';
+            quizTimer = setTimeout(nextRound, 1400);
+          };
+          quizTimer = setInterval(()=>{
+            left--;
+            if(left <= 0){ clearInterval(quizTimer); nextRound(); return; }
+            shareBtnEl.textContent = '点此截图分享 · ' + left;
+          }, 1000);
+        } else {
+          result.textContent = ok ? '猜对啦！' : '猜错啦！';
+          result.classList.add('show', ok ? 'ok' : 'no');
+          // 趁这 0.9 / 1.6 秒把「下一题城市」这一屏的瓦片提前下好（此时不飞行）
+          pendingNext = chooseCitySilent();
+          prefetchCityTiles(pendingNext);
+          quizTimer = setTimeout(startQuizRound, timedMode ? 900 : 1600);   // 限时节奏更快，稍作停留后自动出下一题
+        }
+        // 揭晓：正确答案标绿，选错的标红，其余变淡。
+        // 轮回结算时不做揭晓染色 —— 四个选项保持与右上「芒果猜城市」同款玻璃灰，
+        // 由正中成绩行统一呈现结果
+        if(!isFinal){
+          quizEl.querySelectorAll('.quiz-item').forEach(x=>{
+            if(x.textContent === quizCity.name) x.classList.add('reveal');
+            else if(x === b) x.classList.add('wrong');
+            else x.classList.add('dim');
+          });
+        }
+      });
+      quizEl.appendChild(b);
+    });
+    quizEl.classList.add('show');
+  }
+
+  // 打开网页默认进入猜城市
+  enterGuess();
+
+  /* ============ 墙纸生成（固定 9 : 19.5 全面屏） ============ */
+  const W = 1179, H = 2556;
+  let wallBlobUrl = null;
+  let generating = false;
+
+  const modal = document.getElementById('wallModal');
+  const img = document.getElementById('wallImg');
+  const loadingTint = document.getElementById('wallLoading');
+  const saveBtn = document.getElementById('saveBtn');
+  const frame = document.getElementById('frame');
+  const wallText = document.getElementById('wallText');
+  const textToggle = document.getElementById('textToggle');
+
+  let textVisible = false;          // 预览页默认不勾选「文字」
+  function setTextVisible(v){
+    textVisible = v;
+    wallText.style.display = v ? 'block' : 'none';
+    textToggle.classList.toggle('on', v);
+  }
+  textToggle.addEventListener('click', ()=> setTextVisible(!textVisible));
+  setTextVisible(false);
+
+  /* —— 字体选项：中文字体 / 英文字体分两行，另有大小、颜色 —— */
+  const FONT_CN = [
+    { name:'黑体', css:'"PingFang SC", "Heiti SC", "STHeiti", "Microsoft YaHei", sans-serif' },
+    { name:'宋体', css:'"Songti SC", "STSong", "SimSun", serif' },
+    { name:'楷体', css:'"Kaiti SC", "STKaiti", "KaiTi", serif' }
+  ];
+  const FONT_EN = [
+    { name:'Arial', css:'Arial, "Helvetica Neue", Helvetica, sans-serif' },
+    { name:'Calibri', css:'Calibri, "Segoe UI", "Trebuchet MS", Arial, sans-serif' },
+    { name:'Times New Roman', css:'"Times New Roman", Times, Georgia, serif' }
+  ];
+  let fontFam = FONT_CN[0];
+  let sizeRatio = 0.108;               // 字号 = 预览宽度 × sizeRatio
+  let fontColor = '#FFFFFF';
+  let fontColorPicked = false;         // 用户是否手动选过文字颜色
+
+  const fontBtn = document.getElementById('fontBtn');
+  const fontPanel = document.getElementById('fontPanel');
+  const famCN = document.getElementById('fontFamCN');
+  const famEN = document.getElementById('fontFamEN');
+  const colorBox = document.getElementById('fontColors');
+
+  function pickFont(f, btn){
+    fontFam = f;
+    document.querySelectorAll('.fp-opt[data-fam]').forEach(x=> x.classList.toggle('on', x === btn));
+    wallText.style.fontFamily = f.css;
+  }
+  function buildFamRow(list, box){
+    list.forEach(f=>{
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.fam = f.name;
+      b.className = 'fp-opt' + (f === fontFam ? ' on' : '');
+      b.textContent = f.name;
+      b.style.fontFamily = f.css;
+      b.addEventListener('click', ()=> pickFont(f, b));
+      box.appendChild(b);
+    });
+  }
+  buildFamRow(FONT_CN, famCN);
+  buildFamRow(FONT_EN, famEN);
+  // 与主页面色板同向：每行是一个明度，每列是一条色相（由浅到深）
+  for(let r = 0; r < 8; r++){
+    for(let c = 0; c < 8; c++){
+      const hex = PALETTE[c][r];
+      const b = document.createElement('div');
+      b.className = 'fp-color';
+      b.style.background = hex;
+      b.title = hex;
+      b.addEventListener('click', ()=>{
+        fontColor = hex;
+        fontColorPicked = true;
+        colorBox.querySelectorAll('.fp-color').forEach(x=> x.classList.toggle('on', x === b));
+        wallText.style.color = hex;
+      });
+      colorBox.appendChild(b);
+    }
+  }
+  const fontShuffle = document.createElement('button');
+  fontShuffle.type = 'button';
+  fontShuffle.className = 'fp-opt fp-shuffle';
+  fontShuffle.textContent = '随机';
+  fontShuffle.addEventListener('click', ()=>{
+    const c = PALETTE[Math.floor(Math.random()*8)][Math.floor(Math.random()*8)];
+    fontColor = c;
+    fontColorPicked = true;
+    colorBox.querySelectorAll('.fp-color').forEach(x=> x.classList.toggle('on', x.style.background === c || x.title === c));
+    wallText.style.color = c;
+  });
+  colorBox.appendChild(fontShuffle);
+  wallText.style.fontFamily = fontFam.css;   // 初始字体：黑体
+  document.getElementById('fontSize').addEventListener('input', e=>{
+    sizeRatio = (+e.target.value) / 1000;
+    fitTextSize();
+  });
+  fontBtn.addEventListener('click', ()=>{
+    const open = fontPanel.classList.toggle('open');
+    fontBtn.classList.toggle('on', open);
+  });
+
+  /* —— 定位：勾选后导出图上画红点 —— */
+  let locOnWall = false;
+  const locToggle = document.getElementById('locToggle');
+  locToggle.addEventListener('click', ()=>{
+    locOnWall = !locOnWall;
+    locToggle.classList.toggle('on', locOnWall);
+    renderWallpaper();
+  });
+
+  /* —— 文字框：固定在图片底部，字号随预览宽度缩放，导出时按比例放大 —— */
+  function fitTextSize(){
+    wallText.style.fontSize = Math.round(frame.clientWidth * sizeRatio) + 'px';
+  }
+  if(window.ResizeObserver) new ResizeObserver(fitTextSize).observe(frame);
+
+  // 文字底色 = 地块色（与地图一致），随换色同步
+  function syncTextBand(){
+    document.documentElement.style.setProperty('--block', blockColor);
+  }
+
+  // 文字颜色与底色明暗反差（用户没手动选过颜色时才自动改）
+  function autoContrastText(){
+    if(fontColorPicked) return;
+    const lum = luminance(blockColor);
+    fontColor = lum > 0.62 ? '#231E17' : '#FFFFFF';
+    wallText.style.color = fontColor;
+    colorBox.querySelectorAll('.fp-color').forEach(x=> x.classList.toggle('on', x.title === fontColor));
+  }
+
+  function waitIdle(){
+    return new Promise(resolve=>{
+      let done = false;
+      const finish = ()=>{ if(!done){ done = true; resolve(); } };
+      map.stop();                    // 停掉飞行/惯性动画，确保截取的是静止画面
+      map.once('idle', finish);
+      map.triggerRepaint();
+      setTimeout(finish, 3000);
+    });
+  }
+
+  async function composeCanvas(){
+    map.resize();      // 微信等内核里容器尺寸可能动态变化，先对齐画布
+    await waitIdle();
+    const src = map.getCanvas();
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.fillStyle = blockColor;
+    ctx.fillRect(0, 0, W, H);
+
+    // 等比铺满（cover），以地图中心为基准裁切
+    const sAR = src.width / src.height, tAR = W / H;
+    let sw, sh;
+    if(sAR > tAR){ sh = src.height; sw = sh * tAR; }
+    else { sw = src.width; sh = sw / tAR; }
+    ctx.drawImage(src, (src.width - sw)/2, (src.height - sh)/2, sw, sh, 0, 0, W, H);
+
+    // 定位红点（勾选「定位」时画进导出图）
+    if(locOnWall && me){
+      try{
+        const cont = map.getContainer();
+        const scale = src.width / cont.clientWidth;   // canvas 像素 / CSS 像素
+        const p = map.project(me);
+        const ox = (src.width - sw)/2, oy = (src.height - sh)/2;
+        const wx = (p.x * scale - ox) * (W / sw);
+        const wy = (p.y * scale - oy) * (H / sh);
+        if(wx > -30 && wx < W + 30 && wy > -30 && wy < H + 30){
+          const rad = 8 * (W / sw);                   // 屏上 16px 红点的等比大小
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,.4)';
+          ctx.shadowBlur = rad * 1.4;
+          ctx.fillStyle = '#FF3B30';
+          ctx.beginPath();
+          ctx.arc(wx, wy, rad, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }catch(e){}
+    }
+    return cv;
+  }
+
+  // 把预览里的文字带按同样比例画进导出图（底部色带 + 居中文字）
+  function drawWallText(ctx){
+    if(!textVisible) return;
+    const txt = (wallText.innerText || '').replace(/\n+$/, '');
+    if(!txt.trim()) return;
+    const fw = frame.clientWidth, fh = frame.clientHeight;
+    const fs = parseFloat(getComputedStyle(wallText).fontSize) * (W / fw);
+    const barTop = wallText.offsetTop / fh * H;
+    const barH = wallText.offsetHeight / fh * H;
+
+    // 底部色带：与地块同色
+    ctx.fillStyle = blockColor;
+    ctx.fillRect(0, barTop, W, barH);
+
+    ctx.font = '600 ' + fs + 'px ' + fontFam.css;
+    if('letterSpacing' in ctx) ctx.letterSpacing = (fs * 0.05) + 'px';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = fontColor;
+    const lines = txt.split('\n');
+    const lh = fs * 1.35;
+    const cx = W / 2;
+    const cy = barTop + barH / 2;
+    lines.forEach((line, i)=>{
+      const y = cy + (i - (lines.length - 1) / 2) * lh;
+      ctx.fillText(line, cx, y);
+    });
+    if('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+  }
+
+  async function renderWallpaper(){
+    if(generating) return;
+    generating = true;
+    loadingTint.classList.remove('hide');
+
+    const cv = await composeCanvas();
+    return new Promise(resolve=>{
+      cv.toBlob(blob=>{
+        if(wallBlobUrl) URL.revokeObjectURL(wallBlobUrl);
+        wallBlobUrl = URL.createObjectURL(blob);
+        img.onload = ()=>{
+          loadingTint.classList.add('hide');
+          generating = false;
+          resolve();
+        };
+        img.src = wallBlobUrl;
+      }, 'image/png');
+    });
+  }
+
+  function openModal(){
+    closeSheet();
+    modal.classList.add('open');
+    setTextVisible(false);       // 每次打开预览：文字默认不勾选
+    fitTextSize();
+    syncTextBand();
+    autoContrastText();
+    renderWallpaper();
+  }
+  function closeModal(){
+    modal.classList.remove('open');
+  }
+
+  document.getElementById('wallBtn').addEventListener('click', openModal);
+  document.getElementById('closeModal').addEventListener('click', closeModal);
+  modal.addEventListener('click', e=>{ if(e.target === modal) closeModal(); });
+
+  saveBtn.addEventListener('click', async ()=>{
+    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    const a = document.createElement('a');
+    // 现场合成：地图 + 当前文字（拖到哪画到哪）
+    const cv = await composeCanvas();
+    drawWallText(cv.getContext('2d'));
+    const url = URL.createObjectURL(await new Promise(r=> cv.toBlob(r, 'image/png')));
+    a.href = url;
+    a.download = 'mango-map-' + stamp + '.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=> URL.revokeObjectURL(url), 10000);
+    toast('已保存 · iPhone 可长按预览图存相册', 3200);
+  });
+
+  /* ============ 视口变化 ============ */
+  // 兜底：任何来源（focus / scrollIntoView / 键盘）都不允许文档产生位移
+  const lockDocScroll = ()=>{
+    if(window.scrollY || window.scrollX ||
+       document.documentElement.scrollTop || document.documentElement.scrollLeft ||
+       document.body.scrollTop || document.body.scrollLeft){
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    }
+  };
+  window.addEventListener('scroll', lockDocScroll, { passive:true });
+  document.addEventListener('focusin', ()=> requestAnimationFrame(lockDocScroll), true);
+
+  let rt;
+  window.addEventListener('resize', ()=>{
+    lockDocScroll();
+    clearTimeout(rt);
+    rt = setTimeout(()=> map.resize(), 120);
+  });
+  if(window.visualViewport){
+    window.visualViewport.addEventListener('resize', ()=>{
+      clearTimeout(rt);
+      rt = setTimeout(()=> map.resize(), 120);
+    });
+    window.visualViewport.addEventListener('scroll', lockDocScroll, { passive:true });
+  }
+  map.on('load', ()=>{
+    // 双指缩放时避免整页跟着滚
+    app.addEventListener('touchmove', e=>{
+      if(e.target.closest('.sheet, .modal')) return;
+      e.preventDefault();
+    }, { passive: false });
+  });
+
+  // 调试钩子（?debug=1 时可用，只读）
+  if(q.get('debug')){
+    window.__mm = {
+      map: map,                        // 仅在 ?debug=1 时暴露，便于排查瓦片状态
+      center: ()=> map.getCenter(), zoom: ()=> map.getZoom(),
+      cityZoom, cities: HARD_CITIES.concat(WORLD_CITIES), boot: bootCity,
+      tiers: TIERS, tier: ()=> activeTier.key, pool: ()=> activeTier.pool,
+      used: ()=> [...usedCities],
+      decks: ()=> [...quizDecks].map(([pool, d])=>({
+        key: (TIERS.find(t => t.pool === pool) || {}).key,
+        fresh: d.fresh, size: d.order.length,
+        tail: d.order.slice(d.fresh).map(x => x.name)
+      })),
+      shareCanvas: ()=> buildShareCanvas(),
+      quizState: ()=> ({
+        timed: timedMode, left: timeLeft,
+        right: challengeRight, total: challengeTotal,
+        index: quizIndex, score: quizScore,
+        answers: [...challengeAnswers],
+        city: quizCity && quizCity.name
+      }),
+      blockColor: ()=> blockColor, color: ()=> blockColor,
+      paint: ()=> map.getPaintProperty('paper', 'background-color'),
+      ready: ()=> !!map.loaded() && !map.isMoving(),
+      pack: ()=> ({ active: activePackId, cached: [...packCache.keys()],
+                    tiles: packCache.get(activePackId) ? Object.keys(packCache.get(activePackId).idx).length : 0 })
+    };
+  }
+})();
+</script>
+</body>
+</html>
