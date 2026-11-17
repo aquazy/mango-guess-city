@@ -34,12 +34,16 @@ function loadMapLibre(){
   });
 }
 </script>
-<!-- 百度统计（tongji.baidu.com 站点 ID: a83de6ff4116094cf5c3dc9155e882d8） -->
+<!-- 百度统计：按域名分开统计，GitHub Pages 与 CloudBase 各记各的 -->
 <script>
 var _hmt = _hmt || [];
 (function() {
+  // aquazy.github.io → GitHub Pages 站点；其余（CloudBase 等）→ 原站点
+  var hmId = /aquazy\.github\.io/i.test(location.hostname)
+    ? '32c4bfcaebf632221675a8ab9ed64553'
+    : 'a83de6ff4116094cf5c3dc9155e882d8';
   var hm = document.createElement('script');
-  hm.src = 'https://hm.baidu.com/hm.js?a83de6ff4116094cf5c3dc9155e882d8';
+  hm.src = 'https://hm.baidu.com/hm.js?' + hmId;
   var s = document.getElementsByTagName('script')[0];
   s.parentNode.insertBefore(hm, s);
 })();
